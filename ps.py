@@ -28,7 +28,7 @@ import os
 
 class Kiosk:
 	style = '<style>html {font-family: "Helvetica"; font-size: large } tr:nth-child(even) {background: #DDD} td{text-align: right; padding: 2px 10px} th{padding: 2px 10px} .device-status{color: #CCC} </style>'
-	meta = '<meta http-equiv="refresh" content="2; url=/home/kiosk/index.html">'
+	meta = '<meta http-equiv="refresh" content="2; url=/mnt/ramdisk/index.html">'
 	
 	def __init__(self):
 		self.config = configparser.RawConfigParser()
