@@ -9,43 +9,116 @@ import datetime
 import json
 import numpy
 import uuid
+import configparser
+import os
 
-addr = ('172.17.2.14', 59613)
-clients = []
-clients.append('192.168.1.17')
-clients.append('192.168.1.18')
+#config = configparser.RawConfigParser()
+#config.read('ps.ini')
+
+#addr = ('172.17.2.14', 59613)
+#clients.append('192.168.1.17')
+#clients.append('192.168.1.18')
 #clients.append('172.17.2.14')
 #clients.append('172.17.2.17')
 #clients.append('172.17.2.2')
 #clients.append('172.17.3.111')
 
-device_uuid = str(uuid.uuid4())
-match_uuid = str(uuid.uuid4())
+#device_uuid = str(uuid.uuid4())
+#match_uuid = str(uuid.uuid4())
+
+class Kiosk:
+	style = '<style>html {font-family: "Helvetica"; font-size: large } tr:nth-child(even) {background: #DDD} td{text-align: right; padding: 2px 10px} th{padding: 2px 10px} .device-status{color: #CCC} </style>'
+	meta = '<meta http-equiv="refresh" content="2; url=/home/kiosk/index.html">'
+	
+	def __init__(self):
+		self.config = configparser.RawConfigParser()
+		self.config.read('ps.ini')
+		device_uuid = str(uuid.uuid4())
+		match_uuid = str(uuid.uuid4())
+		self.devices = {}
+		index = 0
+		for name in self.config.sections():
+			self.devices[name] = Device(self.config[name], device_uuid, match_uuid, index)
+			index += 1
+			self.devices[name].poll()
+
+	def loop(self):
+		while True:
+			self.matches = {}
+			for device in self.devices:
+				self.devices[device].poll()
+				if 'match_id' in self.devices[device].match_def:
+					id = self.devices[device].match_def['match_id']
+					if id in self.matches:
+						self.matches[id].update(self.devices[device].match_def, self.devices[device].match_scores)
+					else:
+						self.matches[id] = Match(self.devices[device].match_def, self.devices[device].match_scores)
+			if len(self.matches) > 0:
+				m1 = self.matches[next(iter(self.matches))]
+			self.generate_html()
+			time.sleep(1)
+	
+	def generate_html(self):
+		html = f'<!DOCTYPE html><html lang="en"><head>{self.generate_html_head()}</head><body>{self.generate_html_body()}</body></html>'
+		with open('/mnt/ramdisk/index.html', 'w') as f:
+			f.write(html)
+		
+	def now(self):
+		return datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+	
+	def generate_html_head(self):
+		title = f'<title>{self.now()}</title>'
+		return f'{title}{self.meta}{self.style}'
+	
+	def generate_html_body(self):
+		body = []
+		body.append(f'{self.now()}<br>')
+		for match in self.matches:
+			self.matches[match].generate_table()
+			body.append(f'{self.matches[match].html()}<br>')
+		for device in self.devices:
+			body.append(f'{self.devices[device].html()}<br>')
+		return ''.join(body)
 
 class Device:
-	port = 59613
-	
-	def __init__(self, addr):
-		self.addr = addr
+	def __init__(self, device_data, device_uuid, match_uuid, poll_counter):
+		self.address = device_data.get('Address')
+		self.port = device_data.getint('Port', 59613)
+		self.name = device_data.name
+		self.timeout = device_data.getint('Timeout', 1)
+		self.poll_time = device_data.getint('PollTime', 10)
+		self.poll_counter = poll_counter
+		self.slow_poll = device_data.getint('SlowPoll', 5)
+		self.slow_poll_counter = 0
+		self.shutdown = device_data.get('Shutdown','')
 		self.match_def = {}
 		self.match_scores = {}
 		self.status = {}
-		self.modified_date = '1970-01-01 00:00:00.000'
-		
+		self.update_date = 'Unknown'
+		self.online = False
+		self.match_uuid = match_uuid
+		self.device_uuid = device_uuid
+	
+	def html(self):
+		if 'match_name' in self.match_def:
+			return f'<span class="device-status">{self.name}: {self.match_def["match_name"]}, {self.update_date} {"Online" if self.online else "Offline"} ({self.poll_counter + self.poll_time*self.slow_poll_counter})</span>'
+		else:
+			return f'<span class="device-status">{self.name}: {self.update_date} {"Online" if self.online else "Offline"} ({self.poll_counter + self.poll_time*self.slow_poll_counter})</span>'
+	
 	def poll_status(self):
 		sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-		sock.settimeout(5)
+		sock.settimeout(self.timeout)
 		try:
-			sock.connect((self.addr, self.port))
+			sock.connect((self.address, self.port))
 			request = dict([
 				('ps_name', socket.gethostname()),
 				('ps_port', self.port),
 				('ps_host', sock.getsockname()[0]),
 				('ps_matchname', socket.gethostname()),
-				('ps_matchid', match_uuid),
+				('ps_matchid', self.match_uuid),
 				('ps_modified', time.strftime('%Y-%m-%d %H:%M:%S.000')),
 				('ps_battery', 100),
-				('ps_uniqueid', device_uuid)
+				('ps_uniqueid', self.device_uuid)
 			])
 			json_request = json.dumps(request)
 			header = struct.pack('!IIIII',0x19113006, len(json_request), 6, 4, int(time.time()))
@@ -54,15 +127,16 @@ class Device:
 			response_header = dict(zip(['signature','length','type','flags','time'],struct.unpack('!IIIII',sock.recv(20))))
 			response = sock.recv(response_header['length'])
 			self.status = json.loads(response)
+		except Exception:
+			self.slow_poll_counter = self.slow_poll
 		finally:
 			sock.close()
-			return
 		
 	def poll_match(self):
 		sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-		sock.settimeout(5)
+		sock.settimeout(self.timeout)
 		try:
-			sock.connect((self.addr, self.port))
+			sock.connect((self.address, self.port))
 			header = struct.pack('!IIIII',0x19113006, 0, 8, 4, int(time.time()))
 			sock.sendall(header)
 			time.sleep(1)
@@ -70,21 +144,38 @@ class Device:
 			response = sock.recv(response_header['length'])
 			match_def_length = struct.unpack('!I',response[0:4])[0]
 			self.match_def = json.loads(zlib.decompress(response[4:match_def_length+4]))
-			self.match_scores = json.loads(zlib.decompress(response[match_def_length+4:]))
-			self.modified = match_def.match_modifieddate
+			if len(response) > match_def_length + 4:
+				self.match_scores = json.loads(zlib.decompress(response[match_def_length+4:]))
+		except Exception:
+			self.slow_poll_counter = self.slow_poll
+			self.online = False;
+		else:
+			self.update_date = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+			self.online = True;
 		finally:
 			sock.close()
-			return
 	
 	def poll(self):
-		self.poll_status()
-		if 'ps_modified' in self.status:
-			modified_date = self.status['ps_modified']
-			if modified_date != self.modified_date:
-				modified_time_1 = datetime.datetime.strptime(modified_date,'%Y-%m-%d %H:%M:%S.%f')
-				modified_time_2 = datetime.datetime.strptime(self.modified_date,'%Y-%m-%d %H:%M:%S.%f')
-				if modified_time_1 > modified_time_2:
-					self.poll_match()
+		if self.poll_counter < 1 and self.slow_poll_counter < 1:
+			self.poll_counter = self.poll_time
+			self.poll_status()
+			if self.shutdown != '' and 'ps_matchid' in self.status:
+				if self.status['ps_matchid'] == self.shutdown:
+					os.system('/usr/bin/sudo /usr/sbin/shutdown -h now')
+			#if 'ps_modified' in self.status:
+				#modified_date = self.status['ps_modified']
+				#print (f'{self.modified_date} {modified_date}')
+				#if modified_date != self.modified_date:
+					#modified_time_1 = datetime.datetime.strptime(modified_date,'%Y-%m-%d %H:%M:%S.%f')
+					#modified_time_2 = datetime.datetime.strptime(self.modified_date,'%Y-%m-%d %H:%M:%S.%f')
+					#if modified_time_1 > modified_time_2:
+						#self.poll_match()
+			self.poll_match()
+		elif self.poll_counter < 1:
+			self.slow_poll_counter -= 1
+			self.poll_counter = self.poll_time
+		else:
+			self.poll_counter -= 1
 	
 	def __str__(self):
 		if 'ps_name' in self.status:
@@ -167,31 +258,32 @@ class Match:
 		for shooter in shooters:
 			self.update_shooter(shooter)
 			
-	def print_stage(self, stage):
-		print(self.stages[stage].name)
-		for score in self.scores[stage]:
-			print(self.shooters[score],self.scores[stage][score].total)
+	#def print_stage(self, stage):
+	#	print(self.stages[stage].name)
+	#	for score in self.scores[stage]:
+	#		print(self.shooters[score],self.scores[stage][score].total)
 	
-	def print_stages(self):
-		for stage in self.stages:
-			self.print_stage(stage)
+	#def print_stages(self):
+	#	for stage in self.stages:
+	#		self.print_stage(stage)
 	
-	def print_stage_names(self):
-		print(', '.join('{}: {}'.format(self.stages[stage].number, self.stages[stage].short_name()) for stage in self.stages))
+	#def print_stage_names(self):
+	#	print(', '.join('{}: {}'.format(self.stages[stage].number, self.stages[stage].short_name()) for stage in self.stages))
 	
-	def html_head(self):
-		return f'<!DOCTYPE html><html lang="en"><head><title>{self.name}</title><meta http-equiv="refresh" content="5;url=/home/kiosk/index.html" /><style>html {{font-family: "Helvetica" }} tr:nth-child(even) {{background: #CCC}} td{{text-align: right; padding: 2px 10px}} th{{padding: 2px 10px}} </style></head><body>'
+	#def html_head(self):
+	#	return f'<!DOCTYPE html><html lang="en"><head><title>{self.name}</title><meta http-equiv="refresh" content="5;url=/home/kiosk/index.html" /><style>html {{font-family: "Helvetica"; font-size: large }} tr:nth-child(even) {{background: #CCC}} td{{text-align: right; padding: 2px 10px}} th{{padding: 2px 10px}} </style></head><body>'
 	
-	def html_foot(self):
-		html = 'Divisions: ' + ', '.join((division for division in self.divisions))
-		html += '<br />Last Updated: #</body></html>'
-		return html
+	#def html_foot(self):
+	#	html = 'Divisions: ' + ', '.join((division for division in self.divisions))
+	#	html += '<br />Last Updated: #</body></html>'
+	#	return html
 		
-	def html_title(self):
-		html = f'{self.name} (Last Updated: {self.modified_date})<br />'
+	#def html_title(self):
+	#	now = datetime.datetime.strftime(datetime.datetime.now(),'%Y-%m-%d %H:%M:%S')
+	#	html = f'{now}<br></br>{self.name} (Last Updated: {self.modified_date})<br />'
 		#html += ', '.join(('Stage {}: {}'.format(self.stages[stage].number,self.stages[stage].short_name())) for stage in self.stages)
-		html += '<table>'
-		return html
+	#	html += '<table>'
+	#	return html
 	
 	def html_header(self):
 		return '<tr><th>'+'</th><th>'.join(['Place', 'Name', 'Division', 'Time', ''])+'</th><th>'.join(('Stage {}<br /><span style="font-size: x-small">{}</span>'.format(self.stages[stage].number, self.stages[stage].short_name()) for stage in self.stages))+'</th></tr>'
@@ -206,23 +298,24 @@ class Match:
 		return html + '</table>'
 	
 	def html(self):
-		return self.html_head()+self.html_title()+self.html_header()+self.html_table()+self.html_foot()
+		return f'{self.name}<table>{self.html_header()}{self.html_table()}'
+		#return self.html_head()+self.html_title()+self.html_header()+self.html_table()+self.html_foot()
 	
-	def generate_html(self):
-		self.generate_table()
-		with open('index.html', 'w') as f:
-			f.write(self.html())
+	#def generate_html(self):
+	#	self.generate_table()
+	#	with open('index.html', 'w') as f:
+	#		f.write(self.html())
 	
-	def print_title(self):
-		print(self.name)
-		print(self.modified_date)
+	#def print_title(self):
+	#	print(self.name)
+	#	print(self.modified_date)
 	
-	def print_header(self):
-		print(', '.join(['Place, Name, Division, Time',', '.join(('Stage {}'.format(self.stages[stage].number) for stage in self.stages))]))
+	#def print_header(self):
+	#	print(', '.join(['Place, Name, Division, Time',', '.join(('Stage {}'.format(self.stages[stage].number) for stage in self.stages))]))
 	
-	def print_table(self):
-		for index, item in enumerate(sorted(self.data, key=lambda x: x['total'])):
-			print(', '.join(['{}'.format(index+1), item['name'], item['division'], item['total_string'], ', '.join((item['score_string'][stage] for stage in self.stages))]))
+	#def print_table(self):
+	#	for index, item in enumerate(sorted(self.data, key=lambda x: x['total'])):
+	#		print(', '.join(['{}'.format(index+1), item['name'], item['division'], item['total_string'], ', '.join((item['score_string'][stage] for stage in self.stages))]))
 	
 	def generate_table(self):
 		self.data = []
@@ -242,28 +335,28 @@ class Match:
 			item['total_string'] = self.shooters[shooter].total_string(stages)
 			self.data.append(item)
 	
-	def print_header2(self):
-		print(self.name)
-		print(self.modified_date)
-		self.print_stage_names()
-		print('Name', end='')
-		for stage in self.stages:
-			print(',{}'.format(self.stages[stage].name), end='')
-		print()
-		for shooter in self.shooters:
-			print('"{}"'.format(self.shooters[shooter]), end='')
-			for stage in self.stages:
-				if stage in self.scores:
-					if shooter in self.scores[stage]:
-						if self.scores[stage][shooter].dnf:
-							print(',DNF', end='')
-						else:
-							print(',{:.2f}'.format(self.scores[stage][shooter].total), end='')
-					else:
-						print(',', end='')
-				else:
-					print(',', end='')
-			print()
+	#def print_header2(self):
+	#	print(self.name)
+	#	print(self.modified_date)
+	#	self.print_stage_names()
+	#	print('Name', end='')
+	#	for stage in self.stages:
+	#		print(',{}'.format(self.stages[stage].name), end='')
+	#	print()
+	#	for shooter in self.shooters:
+	#		print('"{}"'.format(self.shooters[shooter]), end='')
+	#		for stage in self.stages:
+	#			if stage in self.scores:
+	#				if shooter in self.scores[stage]:
+	#					if self.scores[stage][shooter].dnf:
+	#						print(',DNF', end='')
+	#					else:
+	#						print(',{:.2f}'.format(self.scores[stage][shooter].total), end='')
+	#				else:
+	#					print(',', end='')
+	#			else:
+	#				print(',', end='')
+	#		print()
 	
 	def __str__(self):
 		return self.name
@@ -443,27 +536,28 @@ class Shooter:
 	def __repr__(self):
 		return '<{} "{}", "{}", "{}">'.format(self.__class__.__name__, self.firstname, self.lastname, self.division)
 
-devices = {}
-for client in clients:
-	devices[client] = Device(client)
-	devices[client].poll()
-	#print(devices[client])
+kiosk = Kiosk()
+kiosk.loop()
 
-while True:
-	for client in clients:
-		devices[client].poll()
-		matches = {}
-	for device in devices:
-		if 'match_id' in devices[device].match_def:
-			id = devices[device].match_def['match_id']
-			if id in matches:
-				matches[id].update(devices[device].match_def, devices[device].match_scores)
-			else:
-				matches[id] = Match(devices[device].match_def, devices[device].match_scores)
-	if len(matches) > 0:
-		m1 = matches[next(iter(matches))]
-		m1.generate_html()
-	time.sleep(10)
+#devices = {}
+#for name in config.sections():
+#	devices[name] = Device(config.get(name, 'Address'), config.getint(name, 'Port'), name)
+#	devices[name].poll()
+
+#while True:
+#	matches = {}
+#	for device in devices:
+#		devices[device].poll()
+#		if 'match_id' in devices[device].match_def:
+#			id = devices[device].match_def['match_id']
+#			if id in matches:
+#				matches[id].update(devices[device].match_def, devices[device].match_scores)
+#			else:
+#				matches[id] = Match(devices[device].match_def, devices[device].match_scores)
+#	if len(matches) > 0:
+#		m1 = matches[next(iter(matches))]
+#		m1.generate_html()
+#	time.sleep(10)
 
 #s1 = m1.shooters[next(iter(m1.shooters))]
 
