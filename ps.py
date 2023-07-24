@@ -11,6 +11,9 @@ import numpy
 import uuid
 import configparser
 import os
+import select
+import errno
+import textwrap
 
 #config = configparser.RawConfigParser()
 #config.read('ps.ini')
@@ -27,8 +30,7 @@ import os
 #match_uuid = str(uuid.uuid4())
 
 class Kiosk:
-	style = '<style>html {font-family: "Helvetica"; font-size: large } tr:nth-child(even) {background: #DDD} td{text-align: right; padding: 2px 10px} th{padding: 2px 10px} .device-status{color: #CCC} </style>'
-	meta = '<meta http-equiv="refresh" content="1; url=/mnt/ramdisk/index.html">'
+	style = '<style>.left{text-align: left} .right{text-align: right} .center{text-align: center} html {font-family: "Helvetica"; font-size: large } tr:nth-child(even) {background: #DDD} td{padding: 2px 10px} th{padding: 2px 10px} .device-status{color: #CCC} </style>'
 	
 	def __init__(self):
 		self.device_config = configparser.RawConfigParser()
@@ -65,7 +67,7 @@ class Kiosk:
 	
 	def generate_html(self):
 		html = f'<!DOCTYPE html><html lang="en"><head>{self.generate_html_head()}</head><body>{self.generate_html_body()}</body></html>'
-		with open('/mnt/ramdisk/index.html', 'w') as f:
+		with open('/mnt/ramdisk/match.html', 'w') as f:
 			f.write(html)
 		
 	def now(self):
@@ -73,7 +75,7 @@ class Kiosk:
 	
 	def generate_html_head(self):
 		title = f'<title>{self.now()}</title>'
-		return f'{title}{self.meta}{self.style}'
+		return f'{title}{self.style}'
 	
 	def generate_html_body(self):
 		body = []
@@ -148,8 +150,12 @@ class Device:
 			response = sock.recv(response_header['length'])
 			match_def_length = struct.unpack('!I',response[0:4])[0]
 			self.match_def = json.loads(zlib.decompress(response[4:match_def_length+4]))
+			with open(f'/mnt/ramdisk/match_def_{self.name}.json', 'w') as f:
+				f.write(json.dumps(self.match_def))
 			if len(response) > match_def_length + 4:
 				self.match_scores = json.loads(zlib.decompress(response[match_def_length+4:]))
+				with open(f'/mnt/ramdisk/match_scores_{self.name}.json', 'w') as f:
+					f.write(json.dumps(self.match_scores))
 		except Exception:
 			self.slow_poll_counter = max(self.slow_poll-1,0)
 			self.online = False;
@@ -239,6 +245,8 @@ class Match:
 							self.shooters[shooter_id].scores[stage_id] = SCSAStageScore(self, stage_id, stage_stagescore)
 					elif self.subtype == 'nra':
 							self.shooters[shooter_id].scores[stage_id] = NRAStageScore(self, stage_id, stage_stagescore)
+					elif self.subtype == 'ipsc':
+							self.shooters[shooter_id].scores[stage_id] = IPSCStageScore(self, stage_id, stage_stagescore)
 	
 	def update_stage(self, match_stage):
 		if match_stage['stage_uuid'] in self.stages:
@@ -286,20 +294,21 @@ class SCSAMatch(Match):
 		self.penalties_value = numpy.array([penalty['pen_val'] for penalty in self.penalties])
 	
 	def html_header(self):
-		return '<tr><th>'+'</th><th>'.join(['Place', 'Name', 'Division', 'Time', ''])+'</th><th>'.join(('Stage {}<br><span style="font-size: small">{}</span>'.format(self.stages[stage].number, self.stages[stage].short_name) for stage in self.stages))+'</th></tr>'
+		return '<tr><th class="center">'+'</th><th class="center">'.join(['#', 'Name', 'Div.', 'Time', ''])+'</th><th class="center">'.join(('Stage {}<br><span style="font-size: x-small">{}</span>'.format(self.stages[stage].number, self.stages[stage].short_name) for stage in self.stages))+'</th></tr>'
 	
 	def html_table(self):
-		html = ''
+		rows = []
 		for index, item in enumerate(sorted(self.data, key=lambda x: x['total'])):
-			html += '<tr><td style="text-align: center">'
-			html += '</td><td style="text-align: center">'.join(['{}'.format(index+1), item['name'], item['division'], item['total_string']]) + '</td><td>'
-			html += '</td><td>'.join((item['score_string'][stage] for stage in self.stages))
-			html += '</td></tr>'
-		return html + '</table>'
+			row = []
+			row.append(f'<td class="center">{index+1}</td><td>{item["name"]}</td><td class="center">{item["division"]}</td><td class="right">{item["total_string"]}</td>')
+			for stage in self.stages:
+				row.append(f'<td class="right">{item["score_string"][stage]}</td>')
+			rows.append(f'<tr>{"".join(row)}</tr>')
+		return ''.join(rows)
 	
 	def html(self):
 		self.generate_table()
-		return f'{self.name}<table>{self.html_header()}{self.html_table()}'
+		return f'{self.name}<table>{self.html_header()}{self.html_table()}</table>'
 	
 	def generate_table(self):
 		self.data = []
@@ -339,7 +348,7 @@ class IPSCMatch(Match):
 			self.data.append(item)
 	
 	def html_header(self):
-		return '<tr><th>'+'</th><th>'.join(['Place', 'Name', 'Division', 'Total', ''])+'</th><th>'.join(('Stage {}<br><span style="font-size: small">{}</span>'.format(self.stages[stage].number, self.stages[stage].short_name) for stage in self.stages))+'</th></tr>'
+		return '<tr><th>'+'</th><th>'.join(['#', 'Name', 'Div.', 'Total', ''])+'</th><th>'.join(('Stage {}<br><span style="font-size: x-small">{}</span>'.format(self.stages[stage].number, self.stages[stage].short_name) for stage in self.stages))+'</th></tr>'
 	
 	def html_table(self):
 		self.generate_table()
@@ -374,7 +383,7 @@ class NRAMatch(Match):
 			self.data.append(item)
 	
 	def html_header(self):
-		return '<tr><th>'+'</th><th>'.join(['Place', 'Name', 'Division', 'Total', ''])+'</th><th>'.join(('Stage {}<br><span style="font-size: small">{}</span>'.format(self.stages[stage].number, self.stages[stage].short_name) for stage in self.stages))+'</th></tr>'
+		return '<tr><th>'+'</th><th>'.join(['#', 'Name', 'Div.', 'Total', ''])+'</th><th>'.join(('Stage {}<br><span style="font-size: x-small">{}</span>'.format(self.stages[stage].number, self.stages[stage].short_name) for stage in self.stages))+'</th></tr>'
 	
 	def html_table(self):
 		self.generate_table()
@@ -406,9 +415,9 @@ class Stage:
 	def update(self, match_stage):
 		self.name = match_stage['stage_name']
 		if 'StageNameSubstitutions' in CONFIG and self.name in CONFIG['StageNameSubstitutions']:
-			self.short_name = CONFIG['StageNameSubstitutions'][match_stage['stage_name']]
+			self.short_name = textwrap.shorten(CONFIG['StageNameSubstitutions'][match_stage['stage_name']], width=12, placeholder='...')
 		else:
-			self.short_name = match_stage['stage_name']
+			self.short_name = textwrap.shorten(match_stage['stage_name'], width=12, placeholder='...')
 		self.number = match_stage['stage_number']
 		self.modified_date = match_stage['stage_modifieddate']
 	
@@ -485,10 +494,18 @@ class SCSAStageScore(StageScore):
 		worst = max(limit)
 		self.total = sum(limit)-worst
 
+class IPSCStageScore(StageScore):
+	def update(self, stage_stagescore):
+		super().update(stage_stagescore)
+		time = sum(stage_stagescore['str'])
+		if time == 0:
+			self.total = 0
+			self.total_string = '0'
+		else:
+			self.total = stage_stagescore['rawpts']/time
+			self.total_string = f'{self.total:.4f} ({stage_stagescore["rawpts"]}/{time})'
+
 class NRAStageScore(StageScore):
-	def __init__(self, match, stage_id, stage_stagescore):
-		super().__init__(match, stage_id, stage_stagescore)
-	
 	def update(self, stage_stagescore):
 		super().update(stage_stagescore)
 		self.total = 0
@@ -558,9 +575,18 @@ class SCSAShooter(Shooter):
 
 class IPSCShooter(Shooter):
 	def score(self, stage):
-		return 0
+		if not self.disqualified and stage.id in self.scores:
+			score = self.scores[stage.id]
+			if score.total != 0 and not score.dnf:
+				return score.total
 	
 	def score_string(self, stage):
+		if not self.disqualified and stage.id in self.scores:
+			score = self.scores[stage.id]
+			if score.dnf:
+				return 'DNF'
+			if score.total != 0:
+				return score.total_string
 		return '-'
 	
 	def total(self, stages):

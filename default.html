@@ -1,9 +1,30 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<title>Waiting for synch...</title>
-<meta http-equiv="refresh" content="5;url=/mnt/ramdisk/index.html" />
-<style>html {font-family: "Helvetica" }</style>
+<!DOCTYPE html><html lang="en"><head><title>Kiosk</title>
+<script>
+var c = 0
+function fn()
+{
+	var if1 = document.getElementById('if1')
+	var if2 = document.getElementById('if2')
+	if (c == 0)
+	{
+		if2.style.opacity='100%';
+		if1.style.opacity='0%'
+		if1.src = "/mnt/ramdisk/match.html";
+	}
+	else
+	{
+		if1.style.opacity='100%';
+		if2.style.opacity='0%'
+		if2.src = "/mnt/ramdisk/match.html";
+	}
+	c = !c
+};
+
+var q = setInterval(fn, 1000);
+
+</script>
 </head>
-<body>Waiting for synch...</body>
-</html>
+<body>
+<iframe style="width: 100%; height: 100%; position: absolute;top: 0;left: 0;border: 0;" id="if1" src="/mnt/ramdisk/match.html"></iframe>
+<iframe style="width: 100%; height: 100%; position: absolute;top: 0;left: 0;border: 0;" id="if2" src="/mnt/ramdisk/match.html"></iframe>
+</body></html>
