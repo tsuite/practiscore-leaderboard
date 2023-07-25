@@ -1,6 +1,5 @@
 #!/usr/bin/python3
 
-#exec(open('ps.py').read())
 import socket
 import struct
 import time
@@ -11,36 +10,18 @@ import numpy
 import uuid
 import configparser
 import os
-import select
-import errno
 import textwrap
 
-#config = configparser.RawConfigParser()
-#config.read('ps.ini')
-
-#addr = ('172.17.2.14', 59613)
-#clients.append('192.168.1.17')
-#clients.append('192.168.1.18')
-#clients.append('172.17.2.14')
-#clients.append('172.17.2.17')
-#clients.append('172.17.2.2')
-#clients.append('172.17.3.111')
-
-#device_uuid = str(uuid.uuid4())
-#match_uuid = str(uuid.uuid4())
-
 class Kiosk:
-	style = '<style>.left{text-align: left} .right{text-align: right} .center{text-align: center} html {font-family: "Helvetica"; font-size: large } tr:nth-child(even) {background: #DDD} td{padding: 2px 10px} th{padding: 2px 10px} .device-status{color: #CCC} </style>'
+	style = '<style>.name, .left{text-align: left} .total, .score, .right{text-align: right} .place, .header, .division, .center{text-align: center} html {font-family: "Helvetica"; font-size: large } tr:nth-child(even) {background: #DDD} td{padding: 2px 10px} th{padding: 2px 10px} .device-status{color: #CCC} </style>'
 	
 	def __init__(self):
 		self.device_config = configparser.RawConfigParser()
 		self.device_config.read('ps-devices.ini')
-		device_uuid = str(uuid.uuid4())
-		match_uuid = str(uuid.uuid4())
 		self.devices = {}
 		index = 0
 		for poll_offset, name in enumerate(self.device_config.sections()):
-			self.devices[name] = Device(self.device_config[name], device_uuid, match_uuid, poll_offset)
+			self.devices[name] = Device(self.device_config[name], poll_offset)
 			self.devices[name].poll()
 
 	def loop(self):
@@ -87,7 +68,7 @@ class Kiosk:
 		return ''.join(body)
 
 class Device:
-	def __init__(self, device_data, device_uuid, match_uuid, poll_offset):
+	def __init__(self, device_data, poll_offset):
 		self.address = device_data.get('Address')
 		self.port = device_data.getint('Port', 59613)
 		self.name = device_data.name
@@ -102,8 +83,7 @@ class Device:
 		self.status = {}
 		self.update_date = 'Unknown'
 		self.online = False
-		self.match_uuid = match_uuid
-		self.device_uuid = device_uuid
+		self.client = PSClient(self.address, self.port, self.timeout)
 	
 	def html(self):
 		if 'match_name' in self.match_def:
@@ -111,94 +91,37 @@ class Device:
 		else:
 			return f'<span class="device-status">{self.name}: {self.update_date} {"Online" if self.online else "Offline"} ({self.poll_counter + self.poll_time*self.slow_poll_counter})</span>'
 	
-	def poll_status(self):
-		sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-		sock.settimeout(self.timeout)
-		try:
-			sock.connect((self.address, self.port))
-			request = dict([
-				('ps_name', socket.gethostname()),
-				('ps_port', self.port),
-				('ps_host', sock.getsockname()[0]),
-				('ps_matchname', socket.gethostname()),
-				('ps_matchid', self.match_uuid),
-				('ps_modified', time.strftime('%Y-%m-%d %H:%M:%S.000')),
-				('ps_battery', 100),
-				('ps_uniqueid', self.device_uuid)
-			])
-			json_request = json.dumps(request)
-			header = struct.pack('!IIIII',0x19113006, len(json_request), 6, 4, int(time.time()))
-			sock.sendall(header + json_request.encode())
-			time.sleep(1)
-			response_header = dict(zip(['signature','length','type','flags','time'],struct.unpack('!IIIII',sock.recv(20))))
-			response = sock.recv(response_header['length'])
-			self.status = json.loads(response)
-		except Exception:
-			self.slow_poll_counter = max(self.slow_poll-1,0)
-		finally:
-			sock.close()
-		
-	def poll_match(self):
-		sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-		sock.settimeout(self.timeout)
-		try:
-			sock.connect((self.address, self.port))
-			header = struct.pack('!IIIII',0x19113006, 0, 8, 4, int(time.time()))
-			sock.sendall(header)
-			time.sleep(1)
-			response_header = dict(zip(['signature','length','type','flags','time'],struct.unpack('!IIIII',sock.recv(20))))
-			response = sock.recv(response_header['length'])
-			match_def_length = struct.unpack('!I',response[0:4])[0]
-			self.match_def = json.loads(zlib.decompress(response[4:match_def_length+4]))
-			with open(f'/mnt/ramdisk/match_def_{self.name}.json', 'w') as f:
-				f.write(json.dumps(self.match_def))
-			if len(response) > match_def_length + 4:
-				self.match_scores = json.loads(zlib.decompress(response[match_def_length+4:]))
-				with open(f'/mnt/ramdisk/match_scores_{self.name}.json', 'w') as f:
-					f.write(json.dumps(self.match_scores))
-		except Exception:
-			self.slow_poll_counter = max(self.slow_poll-1,0)
-			self.online = False;
-		else:
-			self.update_date = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-			self.online = True;
-		finally:
-			sock.close()
-	
 	def poll(self):
 		if self.poll_counter < 1 and self.slow_poll_counter < 1:
 			self.poll_counter = self.poll_time
-			self.poll_status()
+			try:
+				self.status = self.client.read_status()
+				with open(f'/mnt/ramdisk/status_{self.name}.json', 'w') as f:
+					f.write(json.dumps(self.status))
+			except Exception:
+				self.slow_poll_counter = max(self.slow_poll-1,0)
+				self.online = False;
 			if self.shutdown != '' and 'ps_matchid' in self.status:
 				if self.status['ps_matchid'] == self.shutdown:
 					os.system('/usr/bin/sudo /usr/sbin/shutdown -h now')
-			#if 'ps_modified' in self.status:
-				#modified_date = self.status['ps_modified']
-				#print (f'{self.modified_date} {modified_date}')
-				#if modified_date != self.modified_date:
-					#modified_time_1 = datetime.datetime.strptime(modified_date,'%Y-%m-%d %H:%M:%S.%f')
-					#modified_time_2 = datetime.datetime.strptime(self.modified_date,'%Y-%m-%d %H:%M:%S.%f')
-					#if modified_time_1 > modified_time_2:
-						#self.poll_match()
-			self.poll_match()
+			try:
+				(self.match_def, self.match_scores) = self.client.read_match()
+				with open(f'/mnt/ramdisk/match_def_{self.name}.json', 'w') as f:
+					f.write(json.dumps(self.match_def))
+				with open(f'/mnt/ramdisk/match_scores_{self.name}.json', 'w') as f:
+					f.write(json.dumps(self.match_scores))
+			except Exception:
+				self.slow_poll_counter = max(self.slow_poll-1,0)
+				self.online = False;
+			else:
+				self.update_date = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+				self.online = True;
 		elif self.poll_counter < 1:
 			self.slow_poll_counter -= 1
 			self.poll_counter = self.poll_time
 		else:
 			self.poll_counter -= 1
 	
-	def __str__(self):
-		if 'ps_name' in self.status:
-			return '{}'.format(self.status['ps_name'])
-		else:
-			return 'Unknown'
-			
-	def __repr__(self):
-		if 'ps_name' in self.status:
-			return '<{} "{}">'.format(self.__class__.__name__, self.status['ps_name'])
-		else:
-			return '<{} "{}">'.format(self.__class__.__name__, 'Unknown')
-
 class Match:
 	def __init__(self, match_def, match_scores):
 		self.id = match_def['match_id']
@@ -294,15 +217,15 @@ class SCSAMatch(Match):
 		self.penalties_value = numpy.array([penalty['pen_val'] for penalty in self.penalties])
 	
 	def html_header(self):
-		return '<tr><th class="center">'+'</th><th class="center">'.join(['#', 'Name', 'Div.', 'Time', ''])+'</th><th class="center">'.join(('Stage {}<br><span style="font-size: x-small">{}</span>'.format(self.stages[stage].number, self.stages[stage].short_name) for stage in self.stages))+'</th></tr>'
+		return '<tr><th class="header">'+'</th><th class="header">'.join(['#', 'Name', 'Div.', 'Total', ''])+'</th><th class="header">'.join(('Stage {}<br><span style="font-size: x-small">{}</span>'.format(self.stages[stage].number, self.stages[stage].short_name) for stage in self.stages))+'</th></tr>'
 	
 	def html_table(self):
 		rows = []
 		for index, item in enumerate(sorted(self.data, key=lambda x: x['total'])):
 			row = []
-			row.append(f'<td class="center">{index+1}</td><td>{item["name"]}</td><td class="center">{item["division"]}</td><td class="right">{item["total_string"]}</td>')
+			row.append(f'<td class="place">{index+1}</td><td class="name">{item["name"]}</td><td class="division">{item["division"]}</td><td class="total">{item["total_string"]}</td>')
 			for stage in self.stages:
-				row.append(f'<td class="right">{item["score_string"][stage]}</td>')
+				row.append(f'<td class="score">{item["score_string"][stage]}</td>')
 			rows.append(f'<tr>{"".join(row)}</tr>')
 		return ''.join(rows)
 	
@@ -332,23 +255,31 @@ class IPSCMatch(Match):
 	def generate_table(self):
 		self.data = []
 		
-		stages = [self.stages[stage] for stage in self.stages]
-		
 		for shooter in self.shooters:
 			item = {}
 			item['name'] = self.shooters[shooter].name()
 			item['division'] = self.shooters[shooter].short_division
 			item['score'] = {}
 			item['score_string'] = {}
-			for stage in stages:
-				item['score'][stage.id] = self.shooters[shooter].score(stage)
-				item['score_string'][stage.id] = self.shooters[shooter].score_string(stage)
-			item['total'] = self.shooters[shooter].total(stages)
-			item['total_string'] = self.shooters[shooter].total_string(stages)
+			for stage in self.stages:
+				if not self.stages[stage].deleted:
+					item['score'][self.stages[stage].id] = self.shooters[shooter].score(self.stages[stage])
+					item['score_string'][self.stages[stage].id] = self.shooters[shooter].score_string(self.stages[stage])
+			item['total'] = self.shooters[shooter].total(self.stages)
+			item['total_string'] = self.shooters[shooter].total_string(self.stages)
 			self.data.append(item)
 	
 	def html_header(self):
-		return '<tr><th>'+'</th><th>'.join(['#', 'Name', 'Div.', 'Total', ''])+'</th><th>'.join(('Stage {}<br><span style="font-size: x-small">{}</span>'.format(self.stages[stage].number, self.stages[stage].short_name) for stage in self.stages))+'</th></tr>'
+		header = []
+		header.append('<tr>')
+		header.append('<th>#</th>')
+		header.append('<th>Name</th>')
+		header.append('<th>Div.</th>')
+		header.append('<th>Total</th>')
+		for stage in self.stages:
+			header.append(self.stages[stage].html_th)
+		header.append('</tr>')
+		return ''.join(header)
 	
 	def html_table(self):
 		self.generate_table()
@@ -356,7 +287,7 @@ class IPSCMatch(Match):
 		for index, item in enumerate(sorted(self.data, key=lambda x: x['total'], reverse=True)):
 			html += '<tr><td style="text-align: center">'
 			html += '</td><td style="text-align: center">'.join(['{}'.format(index+1), item['name'], item['division'], item['total_string']]) + '</td><td>'
-			html += '</td><td>'.join((item['score_string'][stage] for stage in self.stages))
+			html += '</td><td>'.join((item['score_string'][stage] for stage in item['score_string']))
 			html += '</td></tr>'
 		return html + '</table>'
 	
@@ -387,16 +318,17 @@ class NRAMatch(Match):
 	
 	def html_table(self):
 		self.generate_table()
-		html = ''
+		rows = []
 		for index, item in enumerate(sorted(self.data, key=lambda x: x['total'], reverse=True)):
-			html += '<tr><td style="text-align: center">'
-			html += '</td><td style="text-align: center">'.join(['{}'.format(index+1), item['name'], item['division'], item['total_string']]) + '</td><td>'
-			html += '</td><td>'.join((item['score_string'][stage] for stage in self.stages))
-			html += '</td></tr>'
-		return html + '</table>'
+			row = []
+			row.append(f'<td class="place">{index+1}</td><td class="name">{item["name"]}</td><td class="division">{item["division"]}</td><td class="center">{item["total_string"]}</td>')
+			for stage in self.stages:
+				row.append(f'<td class="center">{item["score_string"][stage]}</td>')
+			rows.append(f'<tr>{"".join(row)}</tr>')
+		return ''.join(rows)
 		
 	def html(self):
-		return f'{self.name}<table>{self.html_header()}{self.html_table()}'
+		return f'{self.name}<table>{self.html_header()}{self.html_table()}</table>'
 
 class Stage:
 	def __init__(self, match, match_stage):
@@ -419,8 +351,15 @@ class Stage:
 		else:
 			self.short_name = textwrap.shorten(match_stage['stage_name'], width=12, placeholder='...')
 		self.number = match_stage['stage_number']
+		self.deleted = self.get_bool(match_stage, 'stage_deleted')
+		self.html_th = f'<th>Stage {self.number}<br><span style="font-size: x-small">{self.short_name}</span></th>'
 		self.modified_date = match_stage['stage_modifieddate']
 	
+	def get_bool(self, dict, key):
+		if key in dict:
+			return dict[key]
+		return False
+		
 	def __str__(self):
 		return self.name
 	
@@ -435,10 +374,9 @@ class SCSAStage(Stage):
 		self.max_time = 30 * (self.strings - self.remove_worst_string)
 
 class IPSCStage(Stage):
-	def update(self, match_stage):
-		super().update(match_stage)
+	pass
 
-class NRAStage(Stage):	
+class NRAStage(Stage):
 	def update(self, match_stage):
 		super().update(match_stage)
 		self.custom_targets = match_stage['stage_customtargets']
@@ -469,12 +407,6 @@ class StageScore:
 			modified_time_2 = datetime.datetime.strptime(self.modified_date,'%Y-%m-%d %H:%M:%S.%f')
 			if modified_time_1 > modified_time_2:
 				self.update(stage_stagescore)
-	
-	def __str__(self):
-		return '{:.2f}'.format(self.total)
-	
-	def __repr__(self):
-		return '<{} {:.2f}>'.format(self.__class__.__name__, self.total)
 
 class SCSAStageScore(StageScore):
 	def __init__(self, match, stage_id, stage_stagescore):
@@ -537,16 +469,17 @@ class Shooter:
 			self.short_division = CONFIG['DivisionNameSubstitutions'][match_shooter['sh_dvp']]
 		else:
 			self.short_division = self.division
-		self.deleted = match_shooter['sh_del']
+		self.deleted = self.get_bool(match_shooter, 'sh_del')
+		self.disqualified = self.get_bool(match_shooter,'sh_dq')
 		self.modified_date = match_shooter['sh_mod']
-		self.disqualified = match_shooter['sh_dq']
-		self.deleted = match_shooter['sh_del']
+	
+	def get_bool(self, dict, key):
+		if key in dict:
+			return dict[key]
+		return False
 	
 	def name(self):
-		return '{} {}'.format(self.firstname, self.lastname)
-	
-	def __repr__(self):
-		return '<{} "{}", "{}", "{}">'.format(self.__class__.__name__, self.firstname, self.lastname, self.division)
+		return f'{self.firstname} {self.lastname}'
 
 class SCSAShooter(Shooter):
 	def score(self, stage):
@@ -618,6 +551,131 @@ class NRAShooter(Shooter):
 		if self.disqualified:
 			return 'DQ'
 		return '{:n}'.format(self.total(stages))
+
+class PSClient:
+	SIGNATURE = 0x19113006
+	FLAGS_ANDROID = 4
+	FLAGS_IOS = 3
+	MSG_STATUS_REQUEST = 6
+	MSG_STATUS_RESPONSE = 7
+	MSG_MATCH_REQUEST = 8
+	MSG_MATCH_RESPONSE = 9
+	
+	class _NetworkError(Exception):
+		def __init__(self, message):
+			self.message = message
+	
+	def __init__(self, host, port, timeout):
+		self.host = host
+		self.port = port
+		self.timeout = timeout
+		self.hostname = socket.gethostname()
+		self.sock = socket.socket()
+		sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+		sock.settimeout(0)
+		try:
+			# doesn't even have to be reachable
+			sock.connect((self.host, self.port))
+			self.ip = sock.getsockname()[0]
+		except Exception:
+			self.ip = '127.0.0.1'
+		finally:
+			sock.close()
+		
+		self.device_status = {'ps_name': self.hostname,
+			'ps_port': self.port,
+			'ps_host': self.ip,
+			'ps_matchname': 'Kiosk Display',
+			'ps_matchid': str(uuid.uuid4()),
+			'ps_modified': time.strftime('%Y-%m-%d %H:%M:%S.000'),
+			'ps_battery': 100,
+			'ps_uniqueid': str(uuid.uuid4())}
+	
+	def __del__(self):
+		self.close()
+	
+	def is_open(self):
+		return self.sock.fileno() > 0
+	
+	def open(self):
+		if self.is_open():
+			self.close()
+		for res in socket.getaddrinfo(self.host, self.port, socket.AF_UNSPEC, socket.SOCK_STREAM):
+			af, sock_type, proto, canon_name, sa = res
+			try:
+				self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+				self.sock.settimeout(self.timeout)
+				self.sock.connect((self.host, self.port))
+			except socket.error:
+				self.sock.close()
+		if not self.is_open():
+			raise PSClient._NetworkError('connection refused')
+	
+	def close(self):
+		self.sock.close()
+	
+	def read_status(self):
+		self.device_status['ps_modified'] = time.strftime('%Y-%m-%d %H:%M:%S.000')
+		tx_data = json.dumps(self.device_status)
+		rx_data = self._req_data(self.MSG_STATUS_REQUEST, self.MSG_STATUS_RESPONSE, tx_data)
+		return json.loads(rx_data)
+	
+	def read_match(self):
+		self.device_status['ps_modified'] = time.strftime('%Y-%m-%d %H:%M:%S.000')
+		rx_data = self._req_data(self.MSG_MATCH_REQUEST, self.MSG_MATCH_RESPONSE)
+		match_def_length = struct.unpack('!I',rx_data[0:4])[0]
+		match_def = json.loads(zlib.decompress(rx_data[4:match_def_length+4]))
+		if len(rx_data) > match_def_length + 4:
+			match_scores = json.loads(zlib.decompress(rx_data[match_def_length+4:]))
+		else:
+			match_scores = ''
+		return (match_def, match_scores)
+	
+	def _send_data(self, tx_type, tx_data):
+		tx_frame = self._add_header(tx_type, tx_data)
+		#if not self.is_open():
+		self.open()
+		self.sock.send(tx_frame)
+	
+	def _recv(self, size):
+		try:
+			r_buffer = self.sock.recv(size)
+		except socket.timeout:
+			self.sock.close()
+			raise PSClient._NetworkError('timeout error')
+		except socket.error:
+			r_buffer = b''
+		if not r_buffer:
+			self.sock.close()
+			raise PSClient._NetworkError('recv error')
+		return r_buffer
+	
+	def _recv_all(self, size):
+		r_buffer = b''
+		while len(r_buffer) < size:
+			r_buffer += self._recv(size - len(r_buffer))
+		return r_buffer
+	
+	def _recv_data(self, rx_type):
+		rx_header = self._recv_all(20)
+		(f_signature, f_length, f_type, f_flags, f_time) = struct.unpack('!IIIII',rx_header)
+		f_signature_err = f_signature != self.SIGNATURE
+		f_type_err = f_type != rx_type
+		f_flags_err = f_flags != self.FLAGS_ANDROID and f_flags != self.FLAGS_IOS
+		if f_signature_err or f_type_err or f_flags_err:
+			self.close()
+			raise PSClient._NetworkError('header checking error')
+		rx_data = self._recv_all(f_length)
+		self.close()
+		return rx_data
+	
+	def _add_header(self, tx_type, tx_data):
+		tx_header = struct.pack('!IIIII', self.SIGNATURE, len(tx_data), tx_type, self.FLAGS_ANDROID, int(time.time()))
+		return tx_header + tx_data.encode()
+	
+	def _req_data(self, tx_type, rx_type, tx_data = ''):
+		self._send_data(tx_type, tx_data)
+		return self._recv_data(rx_type)
 
 CONFIG = configparser.RawConfigParser(delimiters='=')
 CONFIG.read('ps-config.ini')
