@@ -1,4 +1,108 @@
-#!/usr/bin/python3
+#!venv/bin/python3
+
+#import flask
+import configobj
+import configobj.validate
+import asyncio
+
+import sys
+import json
+import argparse
+
+__version__ = '1.0.0-alpha'
+print(__version__)
+
+class Kiosk:
+	def __init__(self):
+		configvalidator = configobj.validate.Validator()
+		configspec = configobj.ConfigObj('configspec.ini', list_values=False, file_error=True, interpolation=False)
+		config = configobj.ConfigObj('config.ini', file_error=True, configspec=configspec, interpolation=False)
+		configvalidation = config.validate(configvalidator, preserve_errors=True)
+		if configvalidation != True:
+			for entry in configobj.flatten_errors(config, configvalidation):
+				section_list, key, error = entry
+				if key is not None:
+					section_list.append(key)
+				else:
+						section_list.append('[missing section]')
+				section_string = '.'.join(section_list)
+				if error == False:
+					error = 'missing value or section.'
+				raise ValueError (f'{config.filename}:{section_string}: {error}')
+		
+		self.devices = {}
+		if 'Devices' in config:
+			for device in config['Devices']:
+				self.devices[str(device)] = PSDevice(device, config['Devices'][device])
+		if 'DummyDevices' in config:
+			for device in config['DummyDevices']:
+				self.devices[device] = JSONDevice(device, config['DummyDevices'][device])
+
+class Device:
+	def __init__(self, name, config):
+		self.name = name
+		for thing in config:
+			print(name, thing)
+	
+	async def update(self):
+		raise NotImplementedError
+
+class JSONDevice(Device):
+	def __init__(self, name, config):
+		super().__init__(name, config)
+		self.match_def_path = config.get('match_def', 'match_def.json')
+		self.match_scores_path = config.get('match_scores', 'match_scores.json')
+		self.match_def = {}
+		self.match_scores = {}
+		#asyncio.run(self.update())
+		
+	async def update(self):
+		with open(match_def_path, 'r') as f:
+			self.match_def = json.load(f)
+		with open(match_scores_path, 'r') as f:
+			self.match_scores = json.load(f)
+
+class PSDevice(Device):
+	def __init__(self, name, config):
+		super().__init__(name, config)
+		self.address = config.get('address')
+		self.port = config.get('port')
+		self.timeout = config.get('timeout')
+		self.poll_time = config.get('poll_time')
+		self.slow_poll = config.get('slow_poll')
+		self.shutdown = config.get('shutdown')
+		self.match_def = {}
+		self.match_scores = {}
+		#asyncio.run(self.update())
+
+class Match:
+	pass
+
+class IPSCMatch(Match):
+	pass
+
+class Shooter:
+	pass
+
+class IPSCShooter(Shooter):
+	pass
+
+class Stage:
+	pass
+
+class IPSCStage(Stage):
+	pass
+
+class StageScore:
+	pass
+
+class IPSCStageScore(StageScore):
+	pass
+
+kiosk = Kiosk()
+
+exit()
+
 
 import socket
 import struct
