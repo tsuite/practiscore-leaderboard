@@ -25,7 +25,9 @@ class Kiosk:
 			self.devices[name].poll()
 
 	def loop(self):
-		while True:
+		x = True
+		while x:
+			#x = False
 			self.matches = {}
 			for device in self.devices:
 				self.devices[device].poll()
@@ -121,7 +123,56 @@ class Device:
 			self.poll_counter = self.poll_time
 		else:
 			self.poll_counter -= 1
+
+class DummyDevice:
+	def __init__(self, device_data, poll_offset):
+		self.address = device_data.get('Address')
+		self.port = device_data.getint('Port', 59613)
+		self.name = device_data.name
+		self.timeout = device_data.getint('Timeout', 1)
+		self.poll_time = device_data.getint('PollTime', 10)
+		self.poll_counter = poll_offset
+		self.slow_poll = device_data.getint('SlowPoll', 5)
+		self.slow_poll_counter = 0
+		self.shutdown = device_data.get('Shutdown','')
+		self.match_def = {}
+		self.match_scores = {}
+		self.status = {}
+		self.update_date = 'Unknown'
+		self.online = False
 	
+	def html(self):
+		if 'match_name' in self.match_def:
+			return f'<span class="device-status">{self.name}: {self.match_def["match_name"]}, {self.update_date} {"Online" if self.online else "Offline"} ({self.poll_counter + self.poll_time*self.slow_poll_counter})</span>'
+		else:
+			return f'<span class="device-status">{self.name}: {self.update_date} {"Online" if self.online else "Offline"} ({self.poll_counter + self.poll_time*self.slow_poll_counter})</span>'
+	
+	def poll(self):
+		if self.poll_counter < 1 and self.slow_poll_counter < 1:
+			self.poll_counter = self.poll_time
+			try:
+				with open(f'status_{self.name}.json', 'r') as f:
+					self.status = json.load(f)
+			except Exception:
+				self.slow_poll_counter = max(self.slow_poll-1,0)
+				self.online = False;
+			try:
+				with open(f'match_def_{self.name}.json', 'r') as f:
+					self.match_def = json.load(f)
+				with open(f'match_scores_{self.name}.json', 'r') as f:
+					self.match_scores = json.load(f)
+			except Exception:
+				self.slow_poll_counter = max(self.slow_poll-1,0)
+				self.online = False;
+			else:
+				self.update_date = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+				self.online = True;
+		elif self.poll_counter < 1:
+			self.slow_poll_counter -= 1
+			self.poll_counter = self.poll_time
+		else:
+			self.poll_counter -= 1
+
 class Match:
 	def __init__(self, match_def, match_scores):
 		self.id = match_def['match_id']
@@ -252,6 +303,10 @@ class SCSAMatch(Match):
 			self.data.append(item)
 
 class IPSCMatch(Match):
+	def update_match_data(self, match_def):
+		super().update_match_data(match_def)
+		self.pfs = match_def['match_pfs']
+	
 	def generate_table(self):
 		self.data = []
 		
@@ -284,7 +339,7 @@ class IPSCMatch(Match):
 	def html_table(self):
 		self.generate_table()
 		html = ''
-		for index, item in enumerate(sorted(self.data, key=lambda x: x['total'], reverse=True)):
+		for index, item in enumerate(sorted(self.data, key=lambda x: x['division'])):
 			html += '<tr><td style="text-align: center">'
 			html += '</td><td style="text-align: center">'.join(['{}'.format(index+1), item['name'], item['division'], item['total_string']]) + '</td><td>'
 			html += '</td><td>'.join((item['score_string'][stage] for stage in item['score_string']))
@@ -360,6 +415,11 @@ class Stage:
 			return dict[key]
 		return False
 		
+	def get_int(self, dict, key):
+		if key in dict:
+			return dict[key]
+		return 0
+	
 	def __str__(self):
 		return self.name
 	
@@ -374,7 +434,10 @@ class SCSAStage(Stage):
 		self.max_time = 30 * (self.strings - self.remove_worst_string)
 
 class IPSCStage(Stage):
-	pass
+	def update(self, match_stage):
+		super().update(match_stage)
+		self.max_points = 5*(match_stage['stage_poppers']+sum([target['target_reqshots'] for target in match_stage['stage_targets']]))
+		self.html_th = f'<th>Stage {self.number}<br><span style="font-size: x-small">Max Points {self.max_points}</span></th>'
 
 class NRAStage(Stage):
 	def update(self, match_stage):
@@ -429,13 +492,30 @@ class SCSAStageScore(StageScore):
 class IPSCStageScore(StageScore):
 	def update(self, stage_stagescore):
 		super().update(stage_stagescore)
-		time = sum(stage_stagescore['str'])
-		if time == 0:
-			self.total = 0
-			self.total_string = '0'
+		if 'ts' in stage_stagescore:
+			a, b, c, d, ns, m, npm = [0]*7
+			if 'poph' in stage_stagescore:
+				a = stage_stagescore['poph']
+			if 'popm' in stage_stagescore:
+				m = stage_stagescore['popm']
+			for x in stage_stagescore['ts']:
+				a += (x) & 0xf
+				b += (x >> 4) & 0xf
+				c += (x >> 8) & 0xf
+				d += (x >> 12) & 0xf
+				ns += (x >> 16) & 0xf
+				m += (x >> 20) & 0xf
+				npm += (x >> 24) & 0xf
+				self.pts = max(a*5+b*3+c*3+d-ns*10-m*10,0)
 		else:
-			self.total = stage_stagescore['rawpts']/time
-			self.total_string = f'{self.total:.4f} ({stage_stagescore["rawpts"]}/{time})'
+			self.pts = 0
+		self.time = sum(stage_stagescore['str'])
+		if self.time == 0:
+			self.hit_factor = 0
+			self.hit_factor_string = '0'
+		else:
+			self.hit_factor = self.pts/self.time
+			self.hit_factor_string = f'HF:{self.hit_factor:.4f}'
 
 class NRAStageScore(StageScore):
 	def update(self, stage_stagescore):
@@ -477,6 +557,11 @@ class Shooter:
 		if key in dict:
 			return dict[key]
 		return False
+		
+	def get_int(self, dict, key):
+		if key in dict:
+			return dict[key]
+		return 0
 	
 	def name(self):
 		return f'{self.firstname} {self.lastname}'
@@ -510,16 +595,16 @@ class IPSCShooter(Shooter):
 	def score(self, stage):
 		if not self.disqualified and stage.id in self.scores:
 			score = self.scores[stage.id]
-			if score.total != 0 and not score.dnf:
-				return score.total
+			if score.hit_factor != 0 and not score.dnf:
+				return score.hit_factor
 	
 	def score_string(self, stage):
 		if not self.disqualified and stage.id in self.scores:
 			score = self.scores[stage.id]
 			if score.dnf:
 				return 'DNF'
-			if score.total != 0:
-				return score.total_string
+			if score.hit_factor != 0:
+				return score.hit_factor_string
 		return '-'
 	
 	def total(self, stages):
