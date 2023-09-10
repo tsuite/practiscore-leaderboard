@@ -32,17 +32,21 @@ class Kiosk:
 		
 		self.devices = {}
 		if 'Devices' in config:
-			for device in config['Devices']:
-				self.devices[str(device)] = PSDevice(device, config['Devices'][device])
+			for device_name in config['Devices']:
+				self.devices[device_name] = PSDevice(device_name, config['Devices'][device_name])
 		if 'DummyDevices' in config:
-			for device in config['DummyDevices']:
-				self.devices[device] = JSONDevice(device, config['DummyDevices'][device])
+			for device_name in config['DummyDevices']:
+				self.devices[device_name] = JSONDevice(device_name, config['DummyDevices'][device_name])
+		
+		print(self.devices)
+		for device_name in self.devices:
+			asyncio.run(self.devices[device_name].update())
 
 class Device:
 	def __init__(self, name, config):
 		self.name = name
-		for thing in config:
-			print(name, thing)
+		self.match_def_path = config.get('match_def_path')
+		self.match_scores_path = config.get('match_scores_path')
 	
 	async def update(self):
 		raise NotImplementedError
@@ -50,17 +54,23 @@ class Device:
 class JSONDevice(Device):
 	def __init__(self, name, config):
 		super().__init__(name, config)
-		self.match_def_path = config.get('match_def', 'match_def.json')
-		self.match_scores_path = config.get('match_scores', 'match_scores.json')
 		self.match_def = {}
 		self.match_scores = {}
 		#asyncio.run(self.update())
 		
 	async def update(self):
-		with open(match_def_path, 'r') as f:
-			self.match_def = json.load(f)
-		with open(match_scores_path, 'r') as f:
-			self.match_scores = json.load(f)
+		if self.match_def_path:
+			try:
+				with open(self.match_def_path, 'r') as f:
+					self.match_def = json.load(f)
+			except FileNotFoundError:
+				pass
+		if self.match_scores_path:
+			try:
+				with open(self.match_scores_path, 'r') as f:
+					self.match_scores = json.load(f)
+			except FileNotFoundError:
+				pass
 
 class PSDevice(Device):
 	def __init__(self, name, config):
@@ -71,9 +81,13 @@ class PSDevice(Device):
 		self.poll_time = config.get('poll_time')
 		self.slow_poll = config.get('slow_poll')
 		self.shutdown = config.get('shutdown')
+		self.status_path = config.get('status_path')
 		self.match_def = {}
 		self.match_scores = {}
 		#asyncio.run(self.update())
+	
+	async def update(self):
+		pass
 
 class Match:
 	pass
