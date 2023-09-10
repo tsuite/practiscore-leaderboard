@@ -1,0 +1,13 @@
+.name, .left{text-align: left}
+.total, .score, .right{text-align: right}
+.place, .header, .division, .center{text-align: center}
+html {font-family: "Helvetica"; font-size: large }
+.device-status{color: #CCC}
+
+table.ipsc tr:nth-child(even) {background: #DDD}
+table.ipsc td{padding: 2px 10px}
+table.ipsc td.stage{text-align: center}
+/* table.ipsc th{text-align: center} */
+table.ipsc th{padding: 2px 10px}
+table.ipsc span.max_score{font-size: x-small}
+/* table.ipsc td.name{text-align: center} */
