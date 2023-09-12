@@ -9,6 +9,7 @@ import uuid
 import time
 import struct
 import zlib
+from apscheduler.schedulers.background import BackgroundScheduler
 
 import sys
 import json
@@ -64,13 +65,7 @@ class Kiosk:
 		if 'DummyDevices' in config:
 			for device_name in config['DummyDevices']:
 				self.devices[device_name] = JSONDevice(device_name, config['DummyDevices'][device_name])
-		
-		for device_name in self.devices:
-			try:
-				#https://dev.to/jmarhee/recurring-background-jobs-in-flask-3407
-				asyncio.run(self.devices[device_name].update())
-			except Exception:
-				pass
+	
 		for device_name in self.devices:
 			device = self.devices[device_name]
 			if device.match_def:
@@ -91,6 +86,12 @@ class Kiosk:
 				if match_subtype == 'ipsc':
 					matches[match_id] = IPSCMatch(match_def, match_scores)
 		return matches
+	def tick(self):
+		for device_name in self.devices:
+			try:
+				asyncio.run(self.devices[device_name].update())
+			except Exception:
+				pass
 
 class Device:
 	def __init__(self, name, config):
@@ -372,9 +373,15 @@ class StageScore:
 class IPSCStageScore(StageScore):
 	pass
 
+def tick():
+	kiosk.tick()
+
 kiosk = Kiosk()
 
 if __name__ == '__main__':
+	scheduler = BackgroundScheduler()
+	scheduler.add_job(tick, 'interval', seconds=3)
+	scheduler.start()
 	app.run(host='0.0.0.0', debug=True)
 
 exit()
