@@ -4,28 +4,31 @@
 <title>2023-07-26 18:22:07</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>2023-07-26 18:22:07<br>T03 Glenorchy IPSC Invitational 2022
-{% for match_id in matches %}
+<body>
+{% for match in data.matches %}
+{{ match['match_name'] }}
 <table class="ipsc">
 <tr>
 <th>#</th>
 <th>Name</th>
 <th>Div.</th>
 <th>Total</th>
-{% for stage in matches[match_id].stage_data() %}
+{% for stage in match.stages %}
 <th>Stage {{ stage.stage_number }}<br><span class="max_score">Max Points {{ stage.max_points }}</span></th>
 {% endfor %}
+{% for division_name in match.divisions %}
 </tr>
-{% for shooter in matches[match_id].shooter_data() %}
+{% for shooter in match.divisions[division_name] %}
 <tr>
 <td>1</td>
 <td>{{ shooter.name }}</td>
 <td class="division">{{ shooter.short_division }}</td>
-<td>-</td>
-{% for stage_id in matches[match_id].stage_list() %}
-<td>Stage</th>
+<td>{{ shooter.match_points_total_text }}</td>
+{% for stage in match.stages %}
+<td>{{ shooter.match_points_text[stage['stage_id']] }}</th>
 {% endfor %}
 </tr>
+{% endfor %}
 {% endfor %}
 </table>
 {% endfor %}

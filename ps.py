@@ -23,7 +23,11 @@ print(f'practiscore-leaderboard-{__version__}')
 
 @app.get('/')
 def get_index():
-	return flask.render_template('index.html', matches=kiosk.matches(), devices=[1,2])
+	data = kiosk.data()
+	for match in data['matches']:
+		for division in match['divisions']:
+				match['divisions'][division] = sorted(match['divisions'][division], key=lambda x: x['match_points_total'], reverse=True)
+	return flask.render_template('index.html', data=data)
 
 @app.get('/json')
 def get_json():
@@ -86,29 +90,15 @@ class Kiosk:
 				if match_subtype == 'ipsc':
 					matches[match_id] = IPSCMatch(match_def, match_scores)
 		return matches
-	def tick(self):
-		for device_name in self.devices:
-			try:
-				asyncio.run(self.devices[device_name].update())
-			except Exception:
-				pass
 	def start(self):
 		self.scheduler = BackgroundScheduler()
 		for device_name in self.devices:
 			device = self.devices[device_name]
 			try:
 				self.scheduler.add_job(device.start, 'interval', seconds=10)
-				#asyncio.run(self.devices[device_name].update())
 			except Exception:
 				pass
 		self.scheduler.start()
-		
-		#loop = asyncio.get_event_loop()
-		#for device_name in self.devices:
-		#	device = self.devices[device_name]
-		#	asyncio.ensure_future(device.start())
-		#loop.run_forever()
-
 
 class Device:
 	def __init__(self, name, config):
@@ -265,13 +255,13 @@ class Match:
 				elif self.match_subtype == 'ipsc':
 					self.scores[stage_id][shooter_id] = IPSCStageScore(self, stage_id, stage_stagescore)
 				
-				if shooter_id in self.shooters:
-					if stage_id not in self.shooters[shooter_id].stages:
-						self.shooters[shooter_id].stages.append(stage_id)
+				#if shooter_id in self.shooters:
+				#	if stage_id not in self.shooters[shooter_id].stages:
+				#		self.shooters[shooter_id].stages.append(stage_id)
 				
-				if stage_id in self.stages:
-					if shooter_id not in self.stages[stage_id].shooters:
-						self.stages[stage_id].shooters.append(shooter_id)
+				#if stage_id in self.stages:
+				#	if shooter_id not in self.stages[stage_id].shooters:
+				#		self.stages[stage_id].shooters.append(shooter_id)
 
 	def update_stage(self, match_stage):
 		if match_stage['stage_uuid'] in self.stages:
@@ -293,13 +283,13 @@ class Match:
 		if match_shooter['sh_uid'] in self.shooters:
 			self.shooters[match_shooter['sh_uid']].update_if_modified(match_shooter)
 		elif self.match_subtype == 'scsa':
-			self.shooters[match_shooter['sh_uid']] = SCSAShooter(match_shooter)
+			self.shooters[match_shooter['sh_uid']] = SCSAShooter(self, match_shooter)
 		elif self.match_subtype == 'nra':
-			self.shooters[match_shooter['sh_uid']] = NRAShooter(match_shooter)
+			self.shooters[match_shooter['sh_uid']] = NRAShooter(self, match_shooter)
 		elif self.match_subtype == 'ipsc':
-			self.shooters[match_shooter['sh_uid']] = IPSCShooter(match_shooter)
+			self.shooters[match_shooter['sh_uid']] = IPSCShooter(self, match_shooter)
 		else:
-			self.shooters[match_shooter['sh_uid']] = Shooter(match_shooter)
+			self.shooters[match_shooter['sh_uid']] = Shooter(self, match_shooter)
 	
 	def update_shooters(self, match_shooters):
 		for match_shooter in match_shooters:
@@ -310,23 +300,32 @@ class Match:
 		return sorted(list, key=lambda x: (self.stages[x].stage_number, self.stages[x].id))
 	def shooter_data(self):
 		return [self.shooters[id].data() for id in self.shooters]
+	def shooter_by_division(self):
+		data = {}
+		for id in self.shooters:
+			shooter = self.shooters[id]
+			if not shooter.division in data:
+				data[shooter.division] = []
+			data[shooter.division].append(shooter.data())
+		return data
 	def stage_data(self):
 		for id in self.stages:
 			self.stages[id].post_process()
-		return [self.stages[id].data() for id in self.stages]
+		return [self.stages[id].data() for id in self.stages if not self.stages[id].stage_deleted]
 
 class IPSCMatch(Match):
 	def update_match_data(self, match_def):
 		super().update_match_data(match_def)
-		self.match_pfs = match_def.get('match_pfs')
+		self.match_pfs = {pf['name'].lower():pf for pf in match_def.get('match_pfs')}
 	def data(self):
-		return {'match_name': self.match_name, 'match_pfs': self.match_pfs, 'stages':self.stage_data(), 'shooters':self.shooter_data()}
+		return {'match_name': self.match_name, 'match_pfs': self.match_pfs, 'stages':self.stage_data(), 'divisions':self.shooter_by_division()}
 
 class Shooter:
-	def __init__(self, match_shooter):
+	def __init__(self, match, match_shooter):
 		self.id = match_shooter['sh_uid']
+		self.match = match
 		self.update(match_shooter)
-		self.stages = []
+		#self.stages = []
 	
 	def update_if_modified(self, match_shooter):
 		modified_date = match_shooter['sh_mod']
@@ -357,7 +356,9 @@ class IPSCShooter(Shooter):
 			score = self.scores[stage.id]
 			if score.hit_factor != 0 and not score.dnf:
 				return score.hit_factor
-	
+	def update(self, match_shooter):
+		super().update(match_shooter)
+		self.pf = match_shooter.get('sh_pf', '')
 	def score_string(self, stage):
 		if not self.disqualified and stage.id in self.scores:
 			score = self.scores[stage.id]
@@ -366,21 +367,39 @@ class IPSCShooter(Shooter):
 			if score.hit_factor != 0:
 				return score.hit_factor_string
 		return '-'
-	
-	def total(self, stages):
-		return 0
-	
-	def total_string(self, stages):
-		return '-'
-	
+	def scores(self):
+		self.match_points = {}
+		self.match_points_text = {}
+		self.hf = {}
+		self.pts = {}
+		self.time = {}
+		if not self.disqualified:
+			for stage_id in [id for id in self.match.stages if not self.match.stages[id].stage_deleted]:
+				stage = self.match.stages[stage_id]
+				max_hit_factor = stage.max_hit_factors.get(self.division,0)
+				if stage_id in self.match.scores and self.id in self.match.scores[stage_id]:
+					score = self.match.scores[stage_id][self.id]
+					self.hf[stage_id] = score.hit_factor
+					self.pts[stage_id] = score.pts
+					self.time[stage_id] = score.time
+					if score.hit_factor == 0 or max_hit_factor == 0:
+						self.match_points[stage_id] = 0
+						self.match_points_text[stage_id] = '-'
+					else:
+						match_points = score.hit_factor/max_hit_factor*stage.max_points
+						self.match_points[stage_id] = match_points
+						self.match_points_text[stage_id] = f'{match_points:.4f}'
+		self.match_points_total = sum(self.match_points[x] for x in self.match_points)
+		self.match_points_total_text = f'{self.match_points_total:.4f}'
 	def data(self):
-		return {'name': self.name(), 'short_division': self.short_division, 'stages': self.stages}
+		self.scores()
+		return {'name': self.name(), 'short_division': self.short_division, 'match_points': self.match_points, 'match_points_text': self.match_points_text, 'match_points_total': self.match_points_total, 'match_points_total_text': self.match_points_total_text, 'hf':self.hf, 'pts':self.pts, 'time':self.time}
 
 class Stage:
 	def __init__(self, match, match_stage):
 		self.match = match
 		self.id = match_stage['stage_uuid']
-		self.shooters = []
+		#self.shooters = []
 		self.update(match_stage)
 		
 	def update_if_modified(self, match_stage):
@@ -413,7 +432,7 @@ class IPSCStage(Stage):
 	def post_process(self):
 		self.max_hit_factor = 0
 		self.max_hit_factors = {}
-		for shooter_id in self.shooters:
+		for shooter_id in self.match.shooters:
 			if self.id in self.match.scores and shooter_id in self.match.scores[self.id]:
 				hit_factor = self.match.scores[self.id][shooter_id].hit_factor
 				if shooter_id in self.match.shooters:
@@ -423,7 +442,7 @@ class IPSCStage(Stage):
 				
 	
 	def data(self):
-		return {'stage_id': self.id, 'shooters': self.shooters, 'stage_number': self.stage_number, 'max_points': self.max_points, 'stage_reqshots': self.stage_reqshots, 'stage_poppers': self.stage_poppers, 'stage_targets': self.stage_targets, 'stage_deleted': self.stage_deleted, 'max_hit_factor': self.max_hit_factor, 'max_hit_factors': self.max_hit_factors}
+		return {'stage_id': self.id, 'stage_number': self.stage_number, 'max_points': self.max_points, 'stage_reqshots': self.stage_reqshots, 'stage_poppers': self.stage_poppers, 'stage_targets': self.stage_targets, 'stage_deleted': self.stage_deleted, 'max_hit_factor': self.max_hit_factor, 'max_hit_factors': self.max_hit_factors}
 
 class StageScore:
 	def __init__(self, match, stage_id, stage_stagescore):
@@ -450,37 +469,33 @@ class StageScore:
 class IPSCStageScore(StageScore):
 	def update(self, stage_stagescore):
 		super().update(stage_stagescore)
+		score = {'A':0, 'B':0, 'C': 0, 'D': 0, 'M': 0, 'NS': 0, 'NPM': 0}
+		pf = self.match.match_pfs.get(self.match.shooters[self.shooter_id].pf.lower(),{})
+		proc_cnts = stage_stagescore.get('proc_cnts',[])
+		if 'poph' in stage_stagescore:
+			score['A'] = stage_stagescore['poph']
+		if 'popns' in stage_stagescore:
+			score['NS'] = -stage_stagescore['popns']
+		if 'popm' in stage_stagescore:
+			score['M'] = -stage_stagescore['popm']
+		score['NS'] -= sum(sum(proc_cnt[x] for x in proc_cnt) for proc_cnt in proc_cnts)
 		if 'ts' in stage_stagescore:
-			a, b, c, d, ns, m, npm = [0]*7
-			if 'poph' in stage_stagescore:
-				a = stage_stagescore['poph']
-			if 'popm' in stage_stagescore:
-				m = stage_stagescore['popm']
 			for x in stage_stagescore['ts']:
-				a += (x) & 0xf
-				b += (x >> 4) & 0xf
-				c += (x >> 8) & 0xf
-				d += (x >> 12) & 0xf
-				ns += (x >> 16) & 0xf
-				m += (x >> 20) & 0xf
-				npm += (x >> 24) & 0xf
-				self.pts = max(a*5+b*3+c*3+d-ns*10-m*10,0)
-		else:
-			self.pts = 0
+				score['A'] += (x) & 0xf
+				score['B'] += (x >> 4) & 0xf
+				score['C'] += (x >> 8) & 0xf
+				score['D'] += (x >> 12) & 0xf
+				score['NS'] -= (x >> 16) & 0xf
+				score['M'] -= (x >> 20) & 0xf
+				score['NPM'] += (x >> 24) & 0xf
+		self.pts = max(sum(pf[k]*score[k] for k in pf if k in score),0)
 		self.time = sum(stage_stagescore['str'])
 		if self.time == 0:
 			self.hit_factor = 0
-			self.hit_factor_string = '0'
+			self.hit_factor_string = '-'
 		else:
 			self.hit_factor = self.pts/self.time
 			self.hit_factor_string = f'HF:{self.hit_factor:.4f}'
-
-
-# match.shooters
-# match.stages
-# match.shooters[].scores[stage_id] (match, stage_stagescore
-# match.stages[].scores[shooter_id]
-# match.scores[stage_id][shooter_id]
 
 if __name__ == '__main__':
 	kiosk = Kiosk()
