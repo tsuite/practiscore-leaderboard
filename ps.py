@@ -27,7 +27,26 @@ def get_index():
 	for match in data['matches']:
 		for division in match['divisions']:
 				match['divisions'][division] = sorted(match['divisions'][division], key=lambda x: x['match_points_total'], reverse=True)
-	return flask.render_template('index.html', data=data)
+	return flask.render_template('index.html', data=data, version=__version__)
+
+@app.get('/match/<match_id>')
+def get_match(match_id):
+	data = kiosk.match_data(match_id)
+	if data['match']:
+		for division in data['match']['divisions']:
+			data['match']['divisions'][division] = sorted(data['match']['divisions'][division], key=lambda x: x['match_points_total'], reverse=True)
+		return flask.render_template('match.html', data=data, version=__version__)
+	return flask.redirect('/', code=302)
+
+@app.get('/match/<match_id>/stage/<stage_id>')
+def get_stage(match_id, stage_id):
+	data = kiosk.stage_data(match_id, stage_id)
+	if data['match'] and data['stage']:
+		if data['match']['match_id'] == match_id:
+			for division in data['match']['divisions']:
+				data['match']['divisions'][division] = sorted(data['match']['divisions'][division], key=lambda x: x['match_points'][stage_id], reverse=True)
+			return flask.render_template('stage.html', data=data, version=__version__)
+	return flask.redirect('/', code=302)
 
 @app.get('/json')
 def get_json():
@@ -77,6 +96,10 @@ class Kiosk:
 	def data(self):
 		matches = self.matches()
 		return {'matches': [matches[id].data() for id in matches], 'devices': [self.devices[id].data() for id in self.devices]}
+	def match_data(self, match_id):
+		return {'match': self.match(match_id).data(), 'devices': [self.devices[id].data() for id in self.devices]}
+	def stage_data(self, match_id, stage_id):
+		return {'match': self.match(match_id).data(), 'stage': self.match(match_id).stage(stage_id).data(), 'devices': [self.devices[id].data() for id in self.devices]}
 	def matches(self):
 		matches = {}
 		for device_name in self.devices:
@@ -90,12 +113,15 @@ class Kiosk:
 				if match_subtype == 'ipsc':
 					matches[match_id] = IPSCMatch(match_def, match_scores)
 		return matches
+	def match(self, match_id):
+		matches = self.matches()
+		return matches.get(match_id)
 	def start(self):
 		self.scheduler = BackgroundScheduler()
 		for device_name in self.devices:
 			device = self.devices[device_name]
 			try:
-				self.scheduler.add_job(device.start, 'interval', seconds=10)
+				self.scheduler.add_job(device.start, 'interval', seconds=device.poll_time)
 			except Exception:
 				pass
 		self.scheduler.start()
@@ -105,6 +131,7 @@ class Device:
 		self.name = name
 		self.match_def_path = config.get('match_def_path')
 		self.match_scores_path = config.get('match_scores_path')
+		self.poll_time = config.get('poll_time')
 		
 	def start(self):
 		self.update()
@@ -152,7 +179,6 @@ class PSDevice(Device):
 		self.address = config.get('address')
 		self.port = config.get('port')
 		self.timeout = config.get('timeout')
-		self.poll_time = config.get('poll_time')
 		self.slow_poll = config.get('slow_poll')
 		self.shutdown = config.get('shutdown')
 		
@@ -254,15 +280,7 @@ class Match:
 					self.scores[stage_id][shooter_id] = NRAStageScore(self, stage_id, stage_stagescore)
 				elif self.match_subtype == 'ipsc':
 					self.scores[stage_id][shooter_id] = IPSCStageScore(self, stage_id, stage_stagescore)
-				
-				#if shooter_id in self.shooters:
-				#	if stage_id not in self.shooters[shooter_id].stages:
-				#		self.shooters[shooter_id].stages.append(stage_id)
-				
-				#if stage_id in self.stages:
-				#	if shooter_id not in self.stages[stage_id].shooters:
-				#		self.stages[stage_id].shooters.append(shooter_id)
-
+	
 	def update_stage(self, match_stage):
 		if match_stage['stage_uuid'] in self.stages:
 			self.stages[match_stage['stage_uuid']].update_if_modified(match_stage)
@@ -312,13 +330,15 @@ class Match:
 		for id in self.stages:
 			self.stages[id].post_process()
 		return [self.stages[id].data() for id in self.stages if not self.stages[id].stage_deleted]
+	def stage(self, stage_id):
+		return self.stages.get(stage_id)
 
 class IPSCMatch(Match):
 	def update_match_data(self, match_def):
 		super().update_match_data(match_def)
 		self.match_pfs = {pf['name'].lower():pf for pf in match_def.get('match_pfs')}
 	def data(self):
-		return {'match_name': self.match_name, 'match_pfs': self.match_pfs, 'stages':self.stage_data(), 'divisions':self.shooter_by_division()}
+		return {'match_name': self.match_name, 'match_id': self.match_id, 'match_pfs': self.match_pfs, 'stages':self.stage_data(), 'divisions':self.shooter_by_division()}
 
 class Shooter:
 	def __init__(self, match, match_shooter):
@@ -351,11 +371,6 @@ class Shooter:
 		return f'{self.firstname} {self.lastname}'
 
 class IPSCShooter(Shooter):
-	def score(self, stage):
-		if not self.disqualified and stage.id in self.scores:
-			score = self.scores[stage.id]
-			if score.hit_factor != 0 and not score.dnf:
-				return score.hit_factor
 	def update(self, match_shooter):
 		super().update(match_shooter)
 		self.pf = match_shooter.get('sh_pf', '')
@@ -382,9 +397,15 @@ class IPSCShooter(Shooter):
 					self.hf[stage_id] = score.hit_factor
 					self.pts[stage_id] = score.pts
 					self.time[stage_id] = score.time
-					if score.hit_factor == 0 or max_hit_factor == 0:
+					if score.dnf :
+						self.match_points[stage_id] = 0
+						self.match_points_text[stage_id] = 'DNF'
+					elif score.time == 0:
 						self.match_points[stage_id] = 0
 						self.match_points_text[stage_id] = '-'
+					elif score.hit_factor == 0 or max_hit_factor == 0:
+						self.match_points[stage_id] = 0
+						self.match_points_text[stage_id] = '0.0000'
 					else:
 						match_points = score.hit_factor/max_hit_factor*stage.max_points
 						self.match_points[stage_id] = match_points
@@ -394,7 +415,6 @@ class IPSCShooter(Shooter):
 	def data(self):
 		self.scores()
 		return {'name': self.name(), 'short_division': self.short_division, 'match_points': self.match_points, 'match_points_text': self.match_points_text, 'match_points_total': self.match_points_total, 'match_points_total_text': self.match_points_total_text, 'hf':self.hf, 'pts':self.pts, 'time':self.time}
-
 class Stage:
 	def __init__(self, match, match_stage):
 		self.match = match

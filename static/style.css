@@ -10,4 +10,5 @@ table.ipsc td.stage{text-align: center}
 /* table.ipsc th{text-align: center} */
 table.ipsc th{padding: 2px 10px}
 table.ipsc span.max_score{font-size: x-small}
+table.ipsc td.match_points{text-align: right}
 /* table.ipsc td.name{text-align: center} */

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>practiscore-leaderboard-{{version}}</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+{% set match = data['match'] %}
+{% set stage = data['stage'] %}
+<a href="/">Back</a> <a href="/match/{{match['match_id']}}">{{ match['match_name'] }}</a>
+<table class="ipsc">
+<tr>
+<th>#</th>
+<th>Name</th>
+<th>Div.</th>
+<th>Total</th>
+
+<th>Stage {{ stage.stage_number }}<br><span class="max_score">Max Points {{ stage.max_points }}</span></th>
+
+{% for division_name, division in match.divisions|dictsort %}
+</tr>
+{% for shooter in division %}
+<tr>
+<td>1</td>
+<td>{{ shooter.name }}</td>
+<td class="division">{{ shooter.short_division }}</td>
+<td class="match_points">{{ shooter.match_points_total_text }}</td>
+<td class="match_points">{{ shooter.match_points_text[stage['stage_id']] }}</th>
+</tr>
+{% endfor %}
+{% endfor %}
+</table>
+</body></html>

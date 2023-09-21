@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<title>2023-07-26 18:22:07</title>
+<title>practiscore-leaderboard-{{version}}</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 {% for match in data.matches %}
-{{ match['match_name'] }}
+<a href="/match/{{match['match_id']}}">{{ match['match_name'] }}</a>
 <table class="ipsc">
 <tr>
 <th>#</th>
@@ -14,18 +14,18 @@
 <th>Div.</th>
 <th>Total</th>
 {% for stage in match.stages %}
-<th>Stage {{ stage.stage_number }}<br><span class="max_score">Max Points {{ stage.max_points }}</span></th>
+<th><a href="/match/{{ match['match_id'] }}/stage/{{ stage.stage_id }}">Stage {{ stage.stage_number }}</a><br><span class="max_score">Max Points {{ stage.max_points }}</span></th>
 {% endfor %}
-{% for division_name in match.divisions %}
+{% for division_name, division in match.divisions|dictsort %}
 </tr>
-{% for shooter in match.divisions[division_name] %}
+{% for shooter in division %}
 <tr>
 <td>1</td>
 <td>{{ shooter.name }}</td>
 <td class="division">{{ shooter.short_division }}</td>
-<td>{{ shooter.match_points_total_text }}</td>
+<td class="match_points">{{ shooter.match_points_total_text }}</td>
 {% for stage in match.stages %}
-<td>{{ shooter.match_points_text[stage['stage_id']] }}</th>
+<td class="match_points">{{ shooter.match_points_text[stage['stage_id']] }}</th>
 {% endfor %}
 </tr>
 {% endfor %}
@@ -33,7 +33,7 @@
 </table>
 {% endfor %}
 
-{% for device in devices %}
+{% for device in data.devices %}
 <br><span class="device-status">{{ device }}</span>
 {% endfor %}
 <!-- <table class="ipsc"> -->
