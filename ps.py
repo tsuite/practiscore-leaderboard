@@ -384,37 +384,76 @@ class IPSCShooter(Shooter):
 		return '-'
 	def scores(self):
 		self.match_points = {}
-		self.match_points_text = {}
-		self.hf = {}
-		self.pts = {}
-		self.time = {}
+		self.match_points_string = {}
+		self.stage_percent = {}
+		self.stage_percent_string = {}
+		self.hit_factor_string = {}
+		self.points_string = {}
+		self.time_string = {}
+		self.hits = {}
+		self.penalties = {}
 		if not self.disqualified:
 			for stage_id in [id for id in self.match.stages if not self.match.stages[id].stage_deleted]:
 				stage = self.match.stages[stage_id]
 				max_hit_factor = stage.max_hit_factors.get(self.division,0)
 				if stage_id in self.match.scores and self.id in self.match.scores[stage_id]:
 					score = self.match.scores[stage_id][self.id]
-					self.hf[stage_id] = score.hit_factor
-					self.pts[stage_id] = score.pts
-					self.time[stage_id] = score.time
+					self.penalties[stage_id] = score.penalties
+					self.time_string[stage_id] = score.time_string
+					self.hits[stage_id] = score.hits
+					self.penalties[stage_id] = score.penalties
 					if score.dnf :
+						self.stage_percent[stage_id] = 0
+						self.stage_percent_string[stage_id] = 'DNF'
 						self.match_points[stage_id] = 0
-						self.match_points_text[stage_id] = 'DNF'
+						self.match_points_string[stage_id] = 'DNF'
+						self.time_string[stage_id] = 'DNF'
+						self.hit_factor_string[stage_id] = 'DNF'
+						self.points_string[stage_id] = 'DNF'
 					elif score.time == 0:
+						self.stage_percent[stage_id] = 0
+						self.stage_percent_string[stage_id] = '-'
 						self.match_points[stage_id] = 0
-						self.match_points_text[stage_id] = '-'
+						self.match_points_string[stage_id] = '-'
+						self.time_string[stage_id] = '-'
+						self.hit_factor_string[stage_id] = '-'
+						self.points_string[stage_id] = '-'
 					elif score.hit_factor == 0 or max_hit_factor == 0:
+						self.stage_percent[stage_id] = 0
+						self.stage_percent_string[stage_id] = f'{0:.2f} %'
 						self.match_points[stage_id] = 0
-						self.match_points_text[stage_id] = '0.0000'
+						self.match_points_string[stage_id] = f'{0:.4f}'
+						self.time_string[stage_id] = f'{0:.2f}'
+						self.hit_factor_string[stage_id] = f'{0:.4f}'
+						self.points_string[stage_id] = f'{0}'
 					else:
-						match_points = score.hit_factor/max_hit_factor*stage.max_points
+						hit_factor_ratio = score.hit_factor/max_hit_factor
+						self.stage_percent[stage_id] = hit_factor_ratio*100
+						self.stage_percent_string[stage_id] = f'{hit_factor_ratio*100:.2f} %'
+						match_points = hit_factor_ratio*stage.max_points
 						self.match_points[stage_id] = match_points
-						self.match_points_text[stage_id] = f'{match_points:.4f}'
+						self.match_points_string[stage_id] = f'{match_points:.4f}'
+						self.time_string[stage_id] = f'{score.time:.2f}'
+						self.hit_factor_string[stage_id] = f'{score.hit_factor:.4f}'
+						self.points_string[stage_id] = f'{score.points}'
 		self.match_points_total = sum(self.match_points[x] for x in self.match_points)
-		self.match_points_total_text = f'{self.match_points_total:.4f}'
+		self.match_points_total_string = f'{self.match_points_total:.4f}'
 	def data(self):
 		self.scores()
-		return {'name': self.name(), 'short_division': self.short_division, 'match_points': self.match_points, 'match_points_text': self.match_points_text, 'match_points_total': self.match_points_total, 'match_points_total_text': self.match_points_total_text, 'hf':self.hf, 'pts':self.pts, 'time':self.time}
+		return {'name': self.name(),
+			'short_division': self.short_division,
+			'hits': self.hits,
+			'hit_factor_string': self.hit_factor_string,
+			'match_points': self.match_points,
+			'match_points_string': self.match_points_string,
+			'match_points_total': self.match_points_total,
+			'match_points_total_string': self.match_points_total_string,
+			'points_string':self.points_string,
+			'time_string':self.time_string,
+			'stage_percent':self.stage_percent,
+			'stage_percent_string':self.stage_percent_string,
+			'penalties':self.penalties}
+
 class Stage:
 	def __init__(self, match, match_stage):
 		self.match = match
@@ -489,33 +528,36 @@ class StageScore:
 class IPSCStageScore(StageScore):
 	def update(self, stage_stagescore):
 		super().update(stage_stagescore)
-		score = {'A':0, 'B':0, 'C': 0, 'D': 0, 'M': 0, 'NS': 0, 'NPM': 0}
+		self.raw_points = stage_stagescore.get('rawpts', 0)
+		hits = {'A':0, 'B':0, 'C': 0, 'D': 0, 'M': 0, 'NS': 0, 'NPM': 0, 'Proc': 0}
+		points = ('A', 'B', 'C', 'D')
+		penalties = ('M', 'NS')
 		pf = self.match.match_pfs.get(self.match.shooters[self.shooter_id].pf.lower(),{})
 		proc_cnts = stage_stagescore.get('proc_cnts',[])
-		if 'poph' in stage_stagescore:
-			score['A'] = stage_stagescore['poph']
-		if 'popns' in stage_stagescore:
-			score['NS'] = -stage_stagescore['popns']
-		if 'popm' in stage_stagescore:
-			score['M'] = -stage_stagescore['popm']
-		score['NS'] -= sum(sum(proc_cnt[x] for x in proc_cnt) for proc_cnt in proc_cnts)
+		hits['A'] = stage_stagescore.get('poph', 0)
+		hits['NS'] = stage_stagescore.get('popns', 0)
+		hits['M'] = stage_stagescore.get('popm', 0)
+		hits['Proc'] = sum(sum(proc_cnt[x] for x in proc_cnt) for proc_cnt in proc_cnts)
 		if 'ts' in stage_stagescore:
 			for x in stage_stagescore['ts']:
-				score['A'] += (x) & 0xf
-				score['B'] += (x >> 4) & 0xf
-				score['C'] += (x >> 8) & 0xf
-				score['D'] += (x >> 12) & 0xf
-				score['NS'] -= (x >> 16) & 0xf
-				score['M'] -= (x >> 20) & 0xf
-				score['NPM'] += (x >> 24) & 0xf
-		self.pts = max(sum(pf[k]*score[k] for k in pf if k in score),0)
+				hits['A'] += (x) & 0xf
+				hits['B'] += (x >> 4) & 0xf
+				hits['C'] += (x >> 8) & 0xf
+				hits['D'] += (x >> 12) & 0xf
+				hits['NS'] += (x >> 16) & 0xf
+				hits['M'] += (x >> 20) & 0xf
+				hits['NPM'] += (x >> 24) & 0xf
+		self.points = sum(pf[k]*hits[k] for k in pf if k in points)
+		self.penalties = sum(pf[k]*hits[k] for k in pf if k in penalties)+10*hits['Proc']
 		self.time = sum(stage_stagescore['str'])
+		self.time_string = f'{self.time:.2f}'
+		self.hits = hits
 		if self.time == 0:
 			self.hit_factor = 0
 			self.hit_factor_string = '-'
 		else:
-			self.hit_factor = self.pts/self.time
-			self.hit_factor_string = f'HF:{self.hit_factor:.4f}'
+			self.hit_factor = max(self.points-self.penalties, 0)/self.time
+			self.hit_factor_string = f'{self.hit_factor:.4f}'
 
 if __name__ == '__main__':
 	kiosk = Kiosk()
@@ -1031,15 +1073,15 @@ class IPSCStageScore(StageScore):
 				ns += (x >> 16) & 0xf
 				m += (x >> 20) & 0xf
 				npm += (x >> 24) & 0xf
-				self.pts = max(a*5+b*3+c*3+d-ns*10-m*10,0)
+				self.points = max(a*5+b*3+c*3+d-ns*10-m*10,0)
 		else:
-			self.pts = 0
+			self.points = 0
 		self.time = sum(stage_stagescore['str'])
 		if self.time == 0:
 			self.hit_factor = 0
 			self.hit_factor_string = '0'
 		else:
-			self.hit_factor = self.pts/self.time
+			self.hit_factor = self.points/self.time
 			self.hit_factor_string = f'HF:{self.hit_factor:.4f}'
 
 class NRAStageScore(StageScore):

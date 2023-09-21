@@ -12,20 +12,26 @@
 <th>#</th>
 <th>Name</th>
 <th>Div.</th>
-<th>Total</th>
+<th>Match Pts</th>
+<th>Match %</th>
 {% for stage in match.stages %}
 <th><a href="/match/{{ match['match_id'] }}/stage/{{ stage.stage_id }}">Stage {{ stage.stage_number }}</a><br><span class="max_score">Max Points {{ stage.max_points }}</span></th>
 {% endfor %}
 {% for division_name, division in match.divisions|dictsort %}
 </tr>
 {% for shooter in division %}
+{% if loop.first %}
+<tr class="hr">
+{% else %}
 <tr>
-<td>1</td>
+{% endif %}
+<td class="place">{{ loop.index }}</td>
 <td>{{ shooter.name }}</td>
 <td class="division">{{ shooter.short_division }}</td>
-<td class="match_points">{{ shooter.match_points_total_text }}</td>
+<td class="match_points">{{ shooter.match_points_total_string }}</td>
+<td class="match_percent">{{ shooter.match_percent_total_string }}</td>
 {% for stage in match.stages %}
-<td class="match_points">{{ shooter.match_points_text[stage['stage_id']] }}</th>
+<td class="match_points">{{ shooter.match_points_string[stage['stage_id']] }}</th>
 {% endfor %}
 </tr>
 {% endfor %}

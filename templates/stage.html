@@ -7,27 +7,40 @@
 <body>
 {% set match = data['match'] %}
 {% set stage = data['stage'] %}
-<a href="/">Back</a> <a href="/match/{{match['match_id']}}">{{ match['match_name'] }}</a>
+{% set stage_id = stage['stage_id'] %}
+
+<a href="/">Back</a> <a href="/match/{{match['match_id']}}">{{ match['match_name'] }}</a> Stage {{ stage.stage_number }} <span class="max_score">(Max Points {{ stage.max_points }})</span>
 <table class="ipsc">
 <tr>
 <th>#</th>
 <th>Name</th>
 <th>Div.</th>
-<th>Total</th>
-
-<th>Stage {{ stage.stage_number }}<br><span class="max_score">Max Points {{ stage.max_points }}</span></th>
-
-{% for division_name, division in match.divisions|dictsort %}
+<th>Pts</th>
+<th>Pen</th>
+<th>Time</th>
+<th>Hit F</th>
+<th>Stage Pts</th>
+<th>Stage %</th>
 </tr>
+{% for division_name, division in match.divisions|dictsort %}
 {% for shooter in division %}
+{% if loop.first %}
+<tr class="hr">
+{% else %}
 <tr>
-<td>1</td>
+{% endif %}
+<td class="place">{{ loop.index }}</td>
 <td>{{ shooter.name }}</td>
 <td class="division">{{ shooter.short_division }}</td>
-<td class="match_points">{{ shooter.match_points_total_text }}</td>
-<td class="match_points">{{ shooter.match_points_text[stage['stage_id']] }}</th>
+<td class="points">{{ shooter.points_string[stage_id] }}</td>
+<td class="penalties">{{ shooter.penalties[stage_id] }}</td>
+<td class="time">{{ shooter.time_string[stage_id] }}</td>
+<td class="hit_factor">{{ shooter.hit_factor_string[stage_id] }}</td>
+<td class="match_points">{{ shooter.match_points_string[stage_id] }}</td>
+<td class="match_percent">{{ shooter.stage_percent_string[stage_id] }}</td>
 </tr>
 {% endfor %}
+
 {% endfor %}
 </table>
 </body></html>
