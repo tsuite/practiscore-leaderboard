@@ -1,7 +1,7 @@
 .name, .left{text-align: left}
 .total, .score, .right{text-align: right}
 .place, .header, .division, .center{text-align: center}
-html {font-family: "Helvetica"; font-size: large }
+html {font-family: "Helvetica"; font-size: normal }
 .device-status{color: #CCC}
 
 table.ipsc {border-collapse: collapse}
@@ -17,6 +17,7 @@ table.ipsc td.points{text-align: center}
 table.ipsc td.penalties{text-align: center}
 table.ipsc td.time{text-align: right}
 table.ipsc td.hit_factor{text-align: right}
+table.ipsc td.hits{text-align: center}
 table.ipsc td.place{text-align: center}
 /* table.ipsc td.name{text-align: center} */
 table.ipsc td, th {

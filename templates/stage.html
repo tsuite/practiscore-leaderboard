@@ -3,18 +3,28 @@
 <head>
 <title>practiscore-leaderboard-{{version}}</title>
 <link rel="stylesheet" href="/static/style.css">
+<link rel="shortcut icon" href="/static/favicon.ico">
 </head>
 <body>
+{{ time }}
+<br>
 {% set match = data['match'] %}
 {% set stage = data['stage'] %}
 {% set stage_id = stage['stage_id'] %}
-
-<a href="/">Back</a> <a href="/match/{{match['match_id']}}">{{ match['match_name'] }}</a> Stage {{ stage.stage_number }} <span class="max_score">(Max Points {{ stage.max_points }})</span>
+<a href="/">Index</a> <a href="/match/{{match['match_id']}}">{{ match['match_name'] }}</a> Stage {{ stage.stage_number }} <span class="max_score">(Max Points {{ stage.max_points }})</span>
 <table class="ipsc">
 <tr>
 <th>#</th>
 <th>Name</th>
 <th>Div.</th>
+<th>A</th>
+<th>B</th>
+<th>C</th>
+<th>D</th>
+<th>M</th>
+<th>NPM</th>
+<th>NS</th>
+<th>Proc</th>
 <th>Pts</th>
 <th>Pen</th>
 <th>Time</th>
@@ -32,6 +42,14 @@
 <td class="place">{{ loop.index }}</td>
 <td>{{ shooter.name }}</td>
 <td class="division">{{ shooter.short_division }}</td>
+<td class="hits">{{ shooter.hits[stage_id]['A'] }}</td>
+<td class="hits">{{ shooter.hits[stage_id]['B'] }}</td>
+<td class="hits">{{ shooter.hits[stage_id]['C'] }}</td>
+<td class="hits">{{ shooter.hits[stage_id]['D'] }}</td>
+<td class="hits">{{ shooter.hits[stage_id]['M'] }}</td>
+<td class="hits">{{ shooter.hits[stage_id]['NPM'] }}</td>
+<td class="hits">{{ shooter.hits[stage_id]['NS'] }}</td>
+<td class="hits">{{ shooter.hits[stage_id]['Proc'] }}</td>
 <td class="points">{{ shooter.points_string[stage_id] }}</td>
 <td class="penalties">{{ shooter.penalties[stage_id] }}</td>
 <td class="time">{{ shooter.time_string[stage_id] }}</td>
@@ -40,7 +58,6 @@
 <td class="match_percent">{{ shooter.stage_percent_string[stage_id] }}</td>
 </tr>
 {% endfor %}
-
 {% endfor %}
 </table>
 </body></html>

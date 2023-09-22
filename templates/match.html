@@ -3,17 +3,19 @@
 <head>
 <title>practiscore-leaderboard-{{version}}</title>
 <link rel="stylesheet" href="/static/style.css">
+<link rel="shortcut icon" href="/static/favicon.ico">
 </head>
 <body>
+{{ time }}
+<br>
 {% set match = data['match'] %}
-<a href="/">Back</a> {{ match['match_name'] }}
+<a href="/">Index</a> {{ match['match_name'] }}
 <table class="ipsc">
 <tr>
 <th>#</th>
 <th>Name</th>
 <th>Div.</th>
 <th>Match Pts</th>
-<th>Match %</th>
 {% for stage in match.stages %}
 <th><a href="/match/{{ match['match_id'] }}/stage/{{ stage.stage_id }}">Stage {{ stage.stage_number }}</a><br><span class="max_score">Max Points {{ stage.max_points }}</span></th>
 {% endfor %}
@@ -29,7 +31,6 @@
 <td>{{ shooter.name }}</td>
 <td class="division">{{ shooter.short_division }}</td>
 <td class="match_points">{{ shooter.match_points_total_string }}</td>
-<td class="match_percent">{{ shooter.match_percent_total_string }}</td>
 {% for stage in match.stages %}
 <td class="match_points">{{ shooter.match_points_string[stage['stage_id']] }}</th>
 {% endfor %}
@@ -37,8 +38,4 @@
 {% endfor %}
 {% endfor %}
 </table>
-
-{% for device in data.devices %}
-<br><span class="device-status">{{ device }}</span>
-{% endfor %}
 </body></html>

@@ -10,7 +10,7 @@ import time
 import struct
 import zlib
 from apscheduler.schedulers.background import BackgroundScheduler
-
+import datetime
 import sys
 import json
 import argparse
@@ -27,7 +27,7 @@ def get_index():
 	for match in data['matches']:
 		for division in match['divisions']:
 				match['divisions'][division] = sorted(match['divisions'][division], key=lambda x: x['match_points_total'], reverse=True)
-	return flask.render_template('index.html', data=data, version=__version__)
+	return flask.render_template('index.html', data=data, version=__version__, time=datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
 
 @app.get('/match/<match_id>')
 def get_match(match_id):
@@ -35,7 +35,7 @@ def get_match(match_id):
 	if data['match']:
 		for division in data['match']['divisions']:
 			data['match']['divisions'][division] = sorted(data['match']['divisions'][division], key=lambda x: x['match_points_total'], reverse=True)
-		return flask.render_template('match.html', data=data, version=__version__)
+		return flask.render_template('match.html', data=data, version=__version__, time=datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
 	return flask.redirect('/', code=302)
 
 @app.get('/match/<match_id>/stage/<stage_id>')
@@ -45,7 +45,7 @@ def get_stage(match_id, stage_id):
 		if data['match']['match_id'] == match_id:
 			for division in data['match']['divisions']:
 				data['match']['divisions'][division] = sorted(data['match']['divisions'][division], key=lambda x: x['match_points'][stage_id], reverse=True)
-			return flask.render_template('stage.html', data=data, version=__version__)
+			return flask.render_template('stage.html', data=data, version=__version__, time=datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
 	return flask.redirect('/', code=302)
 
 @app.get('/json')
@@ -324,7 +324,8 @@ class Match:
 			shooter = self.shooters[id]
 			if not shooter.division in data:
 				data[shooter.division] = []
-			data[shooter.division].append(shooter.data())
+			if not shooter.deleted and not shooter.disqualified:
+				data[shooter.division].append(shooter.data())
 		return data
 	def stage_data(self):
 		for id in self.stages:
@@ -436,6 +437,15 @@ class IPSCShooter(Shooter):
 						self.time_string[stage_id] = f'{score.time:.2f}'
 						self.hit_factor_string[stage_id] = f'{score.hit_factor:.4f}'
 						self.points_string[stage_id] = f'{score.points}'
+				else:
+					self.stage_percent[stage_id] = 0
+					self.stage_percent_string[stage_id] = '-'
+					self.match_points[stage_id] = 0
+					self.match_points_string[stage_id] = '-'
+					self.time_string[stage_id] = '-'
+					self.hit_factor_string[stage_id] = '-'
+					self.points_string[stage_id] = '-'
+					self.hits[stage_id] = {'A':'-', 'B':'-', 'C': '-', 'D': '-', 'M': '-', 'NS': '-', 'NPM': '-', 'Proc': '-'}
 		self.match_points_total = sum(self.match_points[x] for x in self.match_points)
 		self.match_points_total_string = f'{self.match_points_total:.4f}'
 	def data(self):
@@ -492,12 +502,13 @@ class IPSCStage(Stage):
 		self.max_hit_factor = 0
 		self.max_hit_factors = {}
 		for shooter_id in self.match.shooters:
-			if self.id in self.match.scores and shooter_id in self.match.scores[self.id]:
-				hit_factor = self.match.scores[self.id][shooter_id].hit_factor
-				if shooter_id in self.match.shooters:
-					division = self.match.shooters[shooter_id].division
-					self.max_hit_factors[division] = max(self.max_hit_factors[division] if division in self.max_hit_factors else 0, hit_factor)
-				self.max_hit_factor = max(self.max_hit_factor, hit_factor)
+			if not self.match.shooters[shooter_id].deleted and not self.match.shooters[shooter_id].disqualified:
+				if self.id in self.match.scores and shooter_id in self.match.scores[self.id]:
+					hit_factor = self.match.scores[self.id][shooter_id].hit_factor
+					if shooter_id in self.match.shooters:
+						division = self.match.shooters[shooter_id].division
+						self.max_hit_factors[division] = max(self.max_hit_factors[division] if division in self.max_hit_factors else 0, hit_factor)
+					self.max_hit_factor = max(self.max_hit_factor, hit_factor)
 				
 	
 	def data(self):
