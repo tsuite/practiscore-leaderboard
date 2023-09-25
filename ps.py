@@ -29,6 +29,24 @@ def get_index():
 				match['divisions'][division] = sorted(match['divisions'][division], key=lambda x: x['match_points_total'], reverse=True)
 	return flask.render_template('index.html', data=data, version=__version__, time=datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
 
+@app.get('/json/device')
+def get_json_device():
+	return [kiosk.devices[id].data() for id in kiosk.devices]
+
+@app.get('/json/match_def/<id>')
+def get_json_match_def(id):
+	if id in kiosk.devices:
+		return kiosk.devices[id].match_def
+	else:
+		return {'error', 404}, 404
+
+@app.get('/json/match_scores/<id>')
+def get_json_match_scores(id):
+	if id in kiosk.devices:
+		return kiosk.devices[id].match_scores
+	else:
+		return {'error', 404}, 404
+
 @app.get('/match/<match_id>')
 def get_match(match_id):
 	data = kiosk.match_data(match_id)
@@ -84,7 +102,7 @@ class Kiosk:
 		self.devices = {}
 		if 'Devices' in config:
 			for device_name in config['Devices']:
-				self.devices[device_name] = PSDevice(device_name, config['Devices'][device_name], self.device_uuid, self.match_uuid)
+				self.devices[device_name] = PSDevice(device_name, config['Devices'][device_name])
 		if 'DummyDevices' in config:
 			for device_name in config['DummyDevices']:
 				self.devices[device_name] = JSONDevice(device_name, config['DummyDevices'][device_name])
@@ -109,9 +127,8 @@ class Kiosk:
 			match_id = match_def.get('match_id', '')
 			if match_id in matches:
 				matches[match_id].update(match_def, match_scores)
-			else:
-				if match_subtype == 'ipsc':
-					matches[match_id] = IPSCMatch(match_def, match_scores)
+			elif match_subtype in Match.subclasses:
+				matches[match_id] = Match.create(match_def, match_scores)
 		return matches
 	def match(self, match_id):
 		matches = self.matches()
@@ -121,14 +138,17 @@ class Kiosk:
 		for device_name in self.devices:
 			device = self.devices[device_name]
 			try:
-				self.scheduler.add_job(device.start, 'interval', seconds=device.poll_time)
+				if device.poll_time != 0:
+					self.scheduler.add_job(device.start, 'interval', seconds=device.poll_time)
+				else:
+					asyncio.run(device.start())
 			except Exception:
 				pass
 		self.scheduler.start()
 
 class Device:
-	def __init__(self, name, config):
-		self.name = name
+	def __init__(self, id, config):
+		self.id = id
 		self.match_def_path = config.get('match_def_path')
 		self.match_scores_path = config.get('match_scores_path')
 		self.poll_time = config.get('poll_time')
@@ -140,7 +160,9 @@ class Device:
 		raise NotImplementedError
 	
 	def data(self):
-		return {'name': self.name}
+		return {'id': self.id,
+			'type': self.__class__.__name__,
+			'poll_time': self.poll_time}
 
 class JSONDevice(Device):
 	def __init__(self, name, config):
@@ -172,15 +194,22 @@ class PSDevice(Device):
 	MSG_MATCH_REQUEST = 8
 	MSG_MATCH_RESPONSE = 9
 	task = None
-
-	def __init__(self, name, config, device_uuid, match_uuid):
+	
+	def data(self):
+		return super().data() | {'address': self.address,
+			'port': self.port,
+			'shutdown': self.shutdown,
+			'restart': self.restart,
+			'timeout': self.timeout}
+	
+	def __init__(self, name, config):
 		super().__init__(name, config)
-		self.hostname = socket.gethostname()
 		self.address = config.get('address')
 		self.port = config.get('port')
 		self.timeout = config.get('timeout')
 		self.slow_poll = config.get('slow_poll')
 		self.shutdown = config.get('shutdown')
+		self.restart = config.get('restart')
 		
 		self.match_def = {}
 		self.match_scores = {}
@@ -192,9 +221,9 @@ class PSDevice(Device):
 		try:
 			asyncio.run(asyncio.wait_for(self.temp(), timeout=self.timeout))
 		except asyncio.exceptions.TimeoutError:
-			print(f'{self.name}: Timeout Error')
+			print(f'{self.id}: Timeout Error')
 		except OSError:
-			print(f'{self.name}: OSError')
+			print(f'{self.id}: OSError')
 		#	await asyncio.sleep(self.poll_time)
 		#await asyncio.wait_for(self.temp(), timeout=self.timeout)
 		
@@ -237,9 +266,25 @@ class PSDevice(Device):
 		pass
 
 class Match:
+	subclasses = {}
+	
+	@classmethod
+	def subclass(cls, subtype):
+		def decorator(subclass):
+			cls.subclasses[subtype] = subclass
+			return subclass
+		return decorator
+	
+	@classmethod
+	def create(cls, match_def, match_scores):
+		sub_type = match_def.get('match_subtype')
+		if sub_type not in cls.subclasses:
+			return None
+		return cls.subclasses[sub_type](match_def, match_scores)
+	
 	def __init__(self, match_def, match_scores):
-		self.match_id = match_def.get('match_id')
-		self.match_subtype = match_def.get('match_subtype')
+		self.id = match_def.get('match_id')
+		self.sub_type = match_def.get('match_subtype')
 		self.shooters = {}
 		self.stages = {}
 		self.scores = {}
@@ -259,10 +304,10 @@ class Match:
 			self.update_stages(match_def['match_stages'])
 		if 'match_scores' in match_scores:
 			self.update_scores(match_scores['match_scores'])
-		self.match_name = match_def.get('match_name', '')
+		#self.name = match_def.get('match_name', '')
 		
 	def update_match_data(self, match_def):
-		self.match_name = match_def.get('match_name')
+		self.name = match_def.get('match_name')
 		self.match_modifieddate = match_def.get('match_modifieddate')
 		
 	def update_scores(self, match_scores):
@@ -274,21 +319,21 @@ class Match:
 					self.scores[stage_id] = {}
 				if shooter_id in self.scores[stage_id]:
 					self.scores[stage_id][shooter_id].update_if_modified(stage_stagescore)
-				elif self.match_subtype == 'scsa':
+				elif self.sub_type == 'scsa':
 					self.scores[stage_id][shooter_id] = SCSAStageScore(self, stage_id, stage_stagescore)
-				elif self.match_subtype == 'nra':
+				elif self.sub_type == 'nra':
 					self.scores[stage_id][shooter_id] = NRAStageScore(self, stage_id, stage_stagescore)
-				elif self.match_subtype == 'ipsc':
+				elif self.sub_type == 'ipsc':
 					self.scores[stage_id][shooter_id] = IPSCStageScore(self, stage_id, stage_stagescore)
 	
 	def update_stage(self, match_stage):
 		if match_stage['stage_uuid'] in self.stages:
 			self.stages[match_stage['stage_uuid']].update_if_modified(match_stage)
-		elif self.match_subtype == 'scsa':
+		elif self.sub_type == 'scsa':
 			self.stages[match_stage['stage_uuid']] = SCSAStage(self, match_stage)
-		elif self.match_subtype == 'nra':
+		elif self.sub_type == 'nra':
 			self.stages[match_stage['stage_uuid']] = NRAStage(self, match_stage)
-		elif self.match_subtype == 'ipsc':
+		elif self.sub_type == 'ipsc':
 			self.stages[match_stage['stage_uuid']] = IPSCStage(self, match_stage)
 		else:
 			self.stages[match_stage['stage_uuid']] = Stage(self, match_stage)
@@ -300,11 +345,11 @@ class Match:
 	def update_shooter(self, match_shooter):
 		if match_shooter['sh_uid'] in self.shooters:
 			self.shooters[match_shooter['sh_uid']].update_if_modified(match_shooter)
-		elif self.match_subtype == 'scsa':
+		elif self.sub_type == 'scsa':
 			self.shooters[match_shooter['sh_uid']] = SCSAShooter(self, match_shooter)
-		elif self.match_subtype == 'nra':
+		elif self.sub_type == 'nra':
 			self.shooters[match_shooter['sh_uid']] = NRAShooter(self, match_shooter)
-		elif self.match_subtype == 'ipsc':
+		elif self.sub_type == 'ipsc':
 			self.shooters[match_shooter['sh_uid']] = IPSCShooter(self, match_shooter)
 		else:
 			self.shooters[match_shooter['sh_uid']] = Shooter(self, match_shooter)
@@ -333,13 +378,22 @@ class Match:
 		return [self.stages[id].data() for id in self.stages if not self.stages[id].stage_deleted]
 	def stage(self, stage_id):
 		return self.stages.get(stage_id)
+	def data(self):
+		return {'name': self.name, 'id': self.id}
 
+@Match.subclass('ipsc')
 class IPSCMatch(Match):
 	def update_match_data(self, match_def):
 		super().update_match_data(match_def)
 		self.match_pfs = {pf['name'].lower():pf for pf in match_def.get('match_pfs')}
 	def data(self):
-		return {'match_name': self.match_name, 'match_id': self.match_id, 'match_pfs': self.match_pfs, 'stages':self.stage_data(), 'divisions':self.shooter_by_division()}
+		return super().data() | {'match_pfs': self.match_pfs,
+			'stages':self.stage_data(),
+			'divisions':self.shooter_by_division()}
+
+@Match.subclass('silhouette')
+class SilhouetteMatch(Match):
+	pass
 
 class Shooter:
 	def __init__(self, match, match_shooter):
