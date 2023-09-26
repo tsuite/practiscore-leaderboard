@@ -14,6 +14,7 @@ import datetime
 import sys
 import json
 import argparse
+import numpy
 
 app = flask.Flask(__name__)
 
@@ -127,8 +128,10 @@ class Kiosk:
 			match_id = match_def.get('match_id', '')
 			if match_id in matches:
 				matches[match_id].update(match_def, match_scores)
-			elif match_subtype in Match.subclasses:
-				matches[match_id] = Match.create(match_def, match_scores)
+			else:
+				match = Match.create(match_def, match_scores)
+				if match:
+					matches[match_id] = match
 		return matches
 	def match(self, match_id):
 		matches = self.matches()
@@ -266,21 +269,21 @@ class PSDevice(Device):
 		pass
 
 class Match:
-	subclasses = {}
+	_subclasses = {}
 	
 	@classmethod
-	def subclass(cls, subtype):
+	def register(cls, sub_type):
 		def decorator(subclass):
-			cls.subclasses[subtype] = subclass
+			cls._subclasses[sub_type] = subclass
 			return subclass
 		return decorator
 	
 	@classmethod
 	def create(cls, match_def, match_scores):
 		sub_type = match_def.get('match_subtype')
-		if sub_type not in cls.subclasses:
+		if sub_type not in cls._subclasses:
 			return None
-		return cls.subclasses[sub_type](match_def, match_scores)
+		return cls._subclasses[sub_type](match_def, match_scores)
 	
 	def __init__(self, match_def, match_scores):
 		self.id = match_def.get('match_id')
@@ -292,11 +295,11 @@ class Match:
 		self.update(match_def, match_scores)
 	
 	def update(self, match_def, match_scores):
-		match_modifieddate = match_def['match_modifieddate']
-		if match_modifieddate != self.match_modifieddate:
-			match_modifieddate_1 = datetime.datetime.strptime(match_modifieddate,'%Y-%m-%d %H:%M:%S.%f')
-			match_modifieddate_2 = datetime.datetime.strptime(self.match_modifieddate,'%Y-%m-%d %H:%M:%S.%f')
-			if match_modifieddate_1 > match_modifieddate_2:
+		modified_date = match_def['match_modifieddate']
+		if modified_date != self.modified_date:
+			modified_date_1 = datetime.datetime.strptime(modified_date,'%Y-%m-%d %H:%M:%S.%f')
+			modified_date_2 = datetime.datetime.strptime(self.modified_date,'%Y-%m-%d %H:%M:%S.%f')
+			if modified_date_1 > modified_date_2:
 				self.update_match_data(match_def)
 		if 'match_shooters' in match_def:
 			self.update_shooters(match_def['match_shooters'])
@@ -308,7 +311,7 @@ class Match:
 		
 	def update_match_data(self, match_def):
 		self.name = match_def.get('match_name')
-		self.match_modifieddate = match_def.get('match_modifieddate')
+		self.modified_date = match_def.get('match_modifieddate')
 		
 	def update_scores(self, match_scores):
 		for stage in match_scores:
@@ -319,48 +322,44 @@ class Match:
 					self.scores[stage_id] = {}
 				if shooter_id in self.scores[stage_id]:
 					self.scores[stage_id][shooter_id].update_if_modified(stage_stagescore)
-				elif self.sub_type == 'scsa':
-					self.scores[stage_id][shooter_id] = SCSAStageScore(self, stage_id, stage_stagescore)
-				elif self.sub_type == 'nra':
-					self.scores[stage_id][shooter_id] = NRAStageScore(self, stage_id, stage_stagescore)
-				elif self.sub_type == 'ipsc':
-					self.scores[stage_id][shooter_id] = IPSCStageScore(self, stage_id, stage_stagescore)
+				else:
+					score = StageScore.create(self, stage_id, stage_stagescore)
+					if score:
+						self.scores[stage_id][shooter_id] = score
 	
 	def update_stage(self, match_stage):
-		if match_stage['stage_uuid'] in self.stages:
-			self.stages[match_stage['stage_uuid']].update_if_modified(match_stage)
-		elif self.sub_type == 'scsa':
-			self.stages[match_stage['stage_uuid']] = SCSAStage(self, match_stage)
-		elif self.sub_type == 'nra':
-			self.stages[match_stage['stage_uuid']] = NRAStage(self, match_stage)
-		elif self.sub_type == 'ipsc':
-			self.stages[match_stage['stage_uuid']] = IPSCStage(self, match_stage)
+		stage_id = match_stage['stage_uuid']
+		if stage_id in self.stages:
+			self.stages[stage_id].update_if_modified(match_stage)
 		else:
-			self.stages[match_stage['stage_uuid']] = Stage(self, match_stage)
+			stage = Stage.create(self, match_stage)
+			if stage:
+				self.stages[stage_id] = stage
 	
 	def update_stages(self, match_stages):
 		for match_stage in match_stages:
 			self.update_stage(match_stage)
 	
 	def update_shooter(self, match_shooter):
-		if match_shooter['sh_uid'] in self.shooters:
-			self.shooters[match_shooter['sh_uid']].update_if_modified(match_shooter)
-		elif self.sub_type == 'scsa':
-			self.shooters[match_shooter['sh_uid']] = SCSAShooter(self, match_shooter)
-		elif self.sub_type == 'nra':
-			self.shooters[match_shooter['sh_uid']] = NRAShooter(self, match_shooter)
-		elif self.sub_type == 'ipsc':
-			self.shooters[match_shooter['sh_uid']] = IPSCShooter(self, match_shooter)
+		shooter_id = match_shooter['sh_uid']
+		if shooter_id in self.shooters:
+			self.shooters[shooter_id].update_if_modified(match_shooter)
 		else:
-			self.shooters[match_shooter['sh_uid']] = Shooter(self, match_shooter)
+			shooter = Shooter.create(self, match_shooter)
+			if shooter:
+				self.shooters[shooter_id] = shooter
 	
 	def update_shooters(self, match_shooters):
 		for match_shooter in match_shooters:
 			self.update_shooter(match_shooter)
-	
+	def shooter_list(self):
+		return [id for id in self.shooters if not self.shooters[id].disqualified and not self.shooters[id].deleted]
 	def stage_list(self):
-		list = [id for id in self.stages if not self.stages[id].stage_deleted]
-		return sorted(list, key=lambda x: (self.stages[x].stage_number, self.stages[x].id))
+		return [id for id in self.stages if not self.stages[id].deleted]
+	def shooter_list_by_division(self):
+		shooter_list = self.shooter_list()
+		divisions = {self.shooters[id].division for id in shooter_list}
+		return {division: [id for id in shooter_list if self.shooters[id].division == division] for division in divisions}
 	def shooter_data(self):
 		return [self.shooters[id].data() for id in self.shooters]
 	def shooter_by_division(self):
@@ -373,15 +372,18 @@ class Match:
 				data[shooter.division].append(shooter.data())
 		return data
 	def stage_data(self):
-		for id in self.stages:
+		stage_list = self.stage_list()
+		for id in stage_list:
 			self.stages[id].post_process()
-		return [self.stages[id].data() for id in self.stages if not self.stages[id].stage_deleted]
+		return [self.stages[id].data() for id in stage_list]
 	def stage(self, stage_id):
 		return self.stages.get(stage_id)
+	def score_data(self):
+		return [[self.scores[stage_id][shooter_id].data() for stage_id in self.scores for shooter_id in self.scores[stage_id]]]
 	def data(self):
-		return {'name': self.name, 'id': self.id}
+		return {'name': self.name, 'id': self.id, 'stages': self.stage_data(), 'scores': self.score_data()}
 
-@Match.subclass('ipsc')
+@Match.register('ipsc')
 class IPSCMatch(Match):
 	def update_match_data(self, match_def):
 		super().update_match_data(match_def)
@@ -391,16 +393,32 @@ class IPSCMatch(Match):
 			'stages':self.stage_data(),
 			'divisions':self.shooter_by_division()}
 
-@Match.subclass('silhouette')
+@Match.register('silhouette')
 class SilhouetteMatch(Match):
-	pass
+	def data(self):
+		return super().data() | {'divisions': [ self.shooters[shooter_id].data() for shooter_id in self.shooter_list()]}
 
 class Shooter:
+	_subclasses = {}
+	
+	@classmethod
+	def register(cls, sub_type):
+		def decorator(subclass):
+			cls._subclasses[sub_type] = subclass
+			return subclass
+		return decorator
+	
+	@classmethod
+	def create(cls, match, match_shooter):
+		sub_type = match.sub_type
+		if sub_type not in cls._subclasses:
+			return None
+		return cls._subclasses[sub_type](match, match_shooter)
+	
 	def __init__(self, match, match_shooter):
 		self.id = match_shooter['sh_uid']
 		self.match = match
 		self.update(match_shooter)
-		#self.stages = []
 	
 	def update_if_modified(self, match_shooter):
 		modified_date = match_shooter['sh_mod']
@@ -425,6 +443,7 @@ class Shooter:
 	def name(self):
 		return f'{self.firstname} {self.lastname}'
 
+@Shooter.register('ipsc')
 class IPSCShooter(Shooter):
 	def update(self, match_shooter):
 		super().update(match_shooter)
@@ -448,7 +467,7 @@ class IPSCShooter(Shooter):
 		self.hits = {}
 		self.penalties = {}
 		if not self.disqualified:
-			for stage_id in [id for id in self.match.stages if not self.match.stages[id].stage_deleted]:
+			for stage_id in [id for id in self.match.stages if not self.match.stages[id].deleted]:
 				stage = self.match.stages[stage_id]
 				max_hit_factor = stage.max_hit_factors.get(self.division,0)
 				if stage_id in self.match.scores and self.id in self.match.scores[stage_id]:
@@ -518,27 +537,59 @@ class IPSCShooter(Shooter):
 			'stage_percent_string':self.stage_percent_string,
 			'penalties':self.penalties}
 
+@Shooter.register('silhouette')
+class SilhouetteShooter(Shooter):
+	def data(self):
+		return {'name': self.name(), 'scores': self.scores() }
+	
+	def scores(self):
+		stage_list = self.match.stage_list()
+		
+		return [self.match.scores[stage_id][self.id].data() if stage_id in self.match.scores and self.id in self.match.scores[stage_id] else 0 for stage_id in stage_list]
+
 class Stage:
+	_subclasses = {}
+	
+	@classmethod
+	def register(cls, sub_type):
+		def decorator(subclass):
+			cls._subclasses[sub_type] = subclass
+			return subclass
+		return decorator
+	
+	@classmethod
+	def create(cls, match, match_stage):
+		sub_type = match.sub_type
+		if sub_type not in cls._subclasses:
+			return None
+		return cls._subclasses[sub_type](match, match_stage)
+
 	def __init__(self, match, match_stage):
 		self.match = match
 		self.id = match_stage['stage_uuid']
-		#self.shooters = []
 		self.update(match_stage)
 		
 	def update_if_modified(self, match_stage):
-		stage_modifieddate = match_stage['stage_modifieddate']
-		if stage_modifieddate != self.stage_modifieddate:
-			stage_modifieddate_1 = datetime.datetime.strptime(stage_modifieddate,'%Y-%m-%d %H:%M:%S.%f')
-			stage_modifieddate_2 = datetime.datetime.strptime(self.stage_modifieddate,'%Y-%m-%d %H:%M:%S.%f')
-			if stage_modifieddate_1 > stage_modifieddate_2:
+		modified_date = match_stage['stage_modifieddate']
+		if modified_date != self.modified_date:
+			modified_date_1 = datetime.datetime.strptime(modified_date,'%Y-%m-%d %H:%M:%S.%f')
+			modified_date_2 = datetime.datetime.strptime(self.modified_date,'%Y-%m-%d %H:%M:%S.%f')
+			if modified_date_1 > modified_date_2:
 				self.update(match_stage)
 	
 	def update(self, match_stage):
-		self.stage_number = match_stage.get('stage_number')
-		self.stage_name = match_stage.get('stage_name')
-		self.stage_modifieddate = match_stage.get('stage_modifieddate')
-		self.stage_deleted = match_stage.get('stage_deleted', False)
+		self.number = match_stage.get('stage_number')
+		self.name = match_stage.get('stage_name')
+		self.modified_date = match_stage.get('stage_modifieddate')
+		self.deleted = match_stage.get('stage_deleted', False)
+	
+	def post_process(self):
+		pass
+	
+	def data(self):
+		return {'id': self.id, 'number': self.number, 'name': self.name}
 
+@Stage.register('ipsc')
 class IPSCStage(Stage):
 	def __init__(self, match, match_stage):
 		super().__init__(match, match_stage)
@@ -566,9 +617,35 @@ class IPSCStage(Stage):
 				
 	
 	def data(self):
-		return {'stage_id': self.id, 'stage_number': self.stage_number, 'max_points': self.max_points, 'stage_reqshots': self.stage_reqshots, 'stage_poppers': self.stage_poppers, 'stage_targets': self.stage_targets, 'stage_deleted': self.stage_deleted, 'max_hit_factor': self.max_hit_factor, 'max_hit_factors': self.max_hit_factors}
+		return super().data() | {'max_points': self.max_points, 'stage_reqshots': self.stage_reqshots, 'stage_poppers': self.stage_poppers, 'stage_targets': self.stage_targets, 'stage_deleted': self.deleted, 'max_hit_factor': self.max_hit_factor, 'max_hit_factors': self.max_hit_factors}
+
+@Stage.register('silhouette')
+class SilhouetteStage(Stage):
+	def update(self, match_stage):
+		super().update(match_stage)
+		stage_customtargets = match_stage.get('stage_customtargets')
+		self.targets = [[float(target_desc[1]) for target_desc in target['target_targdesc']] for target in stage_customtargets]
+	
+	def data(self):
+		return super().data() | {'targets': self.targets}
 
 class StageScore:
+	_subclasses = {}
+	
+	@classmethod
+	def register(cls, sub_type):
+		def decorator(subclass):
+			cls._subclasses[sub_type] = subclass
+			return subclass
+		return decorator
+	
+	@classmethod
+	def create(cls, match, stage_id, stage_stagescore):
+		sub_type = match.sub_type
+		if sub_type not in cls._subclasses:
+			return None
+		return cls._subclasses[sub_type](match, stage_id, stage_stagescore)
+
 	def __init__(self, match, stage_id, stage_stagescore):
 		self.match = match
 		self.stage_id = stage_id
@@ -589,7 +666,11 @@ class StageScore:
 			modified_date_2 = datetime.datetime.strptime(self.modified_date,'%Y-%m-%d %H:%M:%S.%f')
 			if modified_date_1 > modified_date_2:
 				self.update(stage_stagescore)
+				
+	def data(self):
+		return {'stage_id': self.stage_id, 'shooter_id': self.shooter_id, 'type':self.__class__.__name__} 
 
+@StageScore.register('ipsc')
 class IPSCStageScore(StageScore):
 	def update(self, stage_stagescore):
 		super().update(stage_stagescore)
@@ -623,6 +704,20 @@ class IPSCStageScore(StageScore):
 		else:
 			self.hit_factor = max(self.points-self.penalties, 0)/self.time
 			self.hit_factor_string = f'{self.hit_factor:.4f}'
+
+@StageScore.register('silhouette')
+class SilhouetteStageScore(StageScore):
+	def data(self):
+		return super().data() | {'score': self.score()}
+		
+	def update(self, stage_stagescore):
+		self.targets = stage_stagescore.get('cts')
+		
+	def score(self):
+		if self.stage_id in self.match.stages:
+			return numpy.sum(numpy.multiply(self.targets, self.match.stages[self.stage_id].targets))
+		else:
+			return 0
 
 if __name__ == '__main__':
 	kiosk = Kiosk()
