@@ -1,0 +1,14 @@
+{% extends 'base.html' %}
+{% import 'ipsc.html' as ipsc %}
+{% import 'silhouette.html' as silhouette %}
+
+{% block content %}
+{% for match in data.matches %}
+<a href="/match/{{ match.id }}">{{ match.name }}</a>
+{% if match['sub_type'] == 'ipsc' %}
+	{{ ipsc.match(match) }}
+{% elif match['sub_type'] == 'silhouette' %}
+	{{ silhouette.match(match) }}
+{% endif %}
+{% endfor %}
+{% endblock %}

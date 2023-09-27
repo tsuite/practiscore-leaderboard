@@ -1,0 +1,31 @@
+{% macro match(match) -%}
+<table class="silhouette">
+<tr>
+<th>#</th>
+<th>Name</th>
+<th>Div.</th>
+<th>Match Pts</th>
+{% for stage in match.stages %}
+<th><a href="/match/{{ match.id }}/stage/{{ stage.id }}">{{ stage.name }}</a></th>
+{% endfor %}
+{% for division_name, division in match.divisions|dictsort %}
+</tr>
+{% for shooter in division|sort(attribute='match_points', reverse=True) %}
+{% if loop.first %}
+<tr class="hr">
+{% else %}
+<tr>
+{% endif %}
+<td class="place">{{ loop.index }}</td>
+<td>{{ shooter.name }}</td>
+<td class="division">{{ shooter.short_division }}</td>
+<td class="match_points">{{ shooter.match_points_string }}</td>
+{% for stage in match.stages %}
+<td class="match_points">{{ shooter.targets[stage.id] }}</th>
+{% endfor %}
+</tr>
+{% endfor %}
+{% endfor %}
+</table>
+<br>
+{%- endmacro -%}

@@ -4,24 +4,25 @@
 html {font-family: "Helvetica"; font-size: normal }
 .device-status{color: #CCC}
 
-table.ipsc {border-collapse: collapse}
-table.ipsc tr:nth-child(even) {background: #DDD}
-table.ipsc td{padding: 2px 10px}
-table.ipsc td.stage{text-align: center}
+table {border-collapse: collapse}
+table tr:nth-child(even) {background: #DDD}
+table td{padding: 2px 10px}
+table td.stage{text-align: center}
 /* table.ipsc th{text-align: center} */
-table.ipsc th{padding: 2px 10px}
+table th{padding: 2px 10px}
 span.max_score{font-size: x-small}
 table.ipsc td.match_points{text-align: right}
-table.ipsc td.match_percent{text-align: right}
-table.ipsc td.points{text-align: center}
-table.ipsc td.penalties{text-align: center}
-table.ipsc td.time{text-align: right}
-table.ipsc td.hit_factor{text-align: right}
-table.ipsc td.hits{text-align: center}
-table.ipsc td.place{text-align: center}
+table td.match_points{text-align: center}
+table td.match_percent{text-align: right}
+table td.points{text-align: center}
+table td.penalties{text-align: center}
+table td.time{text-align: right}
+table td.hit_factor{text-align: right}
+table td.hits{text-align: center}
+table td.place{text-align: center}
 /* table.ipsc td.name{text-align: center} */
-table.ipsc td, th {
+table td, th {
 	border-left: 2px solid #fff;
 	border-right: 2px solid #fff;
 }
-table.ipsc tr.hr {border-top: 1px solid #000}
+table tr.hr {border-top: 1px solid #000}

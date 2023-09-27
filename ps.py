@@ -30,9 +30,22 @@ def get_index():
 				match['divisions'][division] = sorted(match['divisions'][division], key=lambda x: x['match_points_total'], reverse=True)
 	return flask.render_template('index.html', data=data, version=__version__, time=datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
 
+@app.get('/2')
+def get_index2():
+	data = kiosk.data()
+	return flask.render_template('matches.html', data=data, version=__version__, time=datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+
 @app.get('/json/device')
 def get_json_device():
 	return [kiosk.devices[id].data() for id in kiosk.devices]
+
+@app.get('/save/device/<id>')
+def save_device(id):
+	if id in kiosk.devices:
+		kiosk.devices[id].save()
+		return {'match_def': kiosk.devices[id].match_def, 'match_scores': kiosk.devices[id].match_scores}
+	else:
+		return {'error', 404}, 404
 
 @app.get('/json/match_def/<id>')
 def get_json_match_def(id):
@@ -155,6 +168,8 @@ class Device:
 		self.match_def_path = config.get('match_def_path')
 		self.match_scores_path = config.get('match_scores_path')
 		self.poll_time = config.get('poll_time')
+		self.match_def = {}
+		self.match_scores = {}
 		
 	def start(self):
 		self.update()
@@ -162,17 +177,15 @@ class Device:
 	def update(self):
 		raise NotImplementedError
 	
+	def save(self):
+		pass
+	
 	def data(self):
 		return {'id': self.id,
 			'type': self.__class__.__name__,
 			'poll_time': self.poll_time}
 
 class JSONDevice(Device):
-	def __init__(self, name, config):
-		super().__init__(name, config)
-		self.match_def = {}
-		self.match_scores = {}
-		#asyncio.run(self.update())
 		
 	def update(self):
 		if self.match_def_path:
@@ -213,22 +226,14 @@ class PSDevice(Device):
 		self.slow_poll = config.get('slow_poll')
 		self.shutdown = config.get('shutdown')
 		self.restart = config.get('restart')
-		
-		self.match_def = {}
-		self.match_scores = {}
 	
 	def update(self):
-		#if not self.task or self.task.done():
-		#	self.task = asyncio.create_task(self.temp())
-		#while True:
 		try:
 			asyncio.run(asyncio.wait_for(self.temp(), timeout=self.timeout))
 		except asyncio.exceptions.TimeoutError:
 			print(f'{self.id}: Timeout Error')
 		except OSError:
 			print(f'{self.id}: OSError')
-		#	await asyncio.sleep(self.poll_time)
-		#await asyncio.wait_for(self.temp(), timeout=self.timeout)
 		
 	async def temp(self):
 		reader, writer = await asyncio.open_connection(self.address, self.port)
@@ -252,19 +257,23 @@ class PSDevice(Device):
 		match_def = json.loads(zlib.decompress(await reader.readexactly(match_def_length)))
 		if match_def:
 			self.match_def = match_def
-			if self.match_def_path:
-				with open(self.match_def_path, 'w') as f:
-					f.write(json.dumps(match_def))
+			
 		if match_scores_length:
 			match_scores = json.loads(zlib.decompress(await reader.readexactly(match_scores_length)))
 			if match_scores:
 				self.match_scores = match_scores
-				if self.match_scores_path:
-					with open(self.match_scores_path, 'w') as f:
-						f.write(json.dumps(match_scores))
+				
 		writer.close()
 		await writer.wait_closed()
-		
+	
+	def save(self):
+		if self.match_def and self.match_def_path:
+			with open(self.match_def_path, 'w') as f:
+				f.write(json.dumps(self.match_def))
+		if self.match_scores and self.match_scores_path:
+			with open(self.match_scores_path, 'w') as f:
+				f.write(json.dumps(self.match_scores))
+	
 	class PSInvalidHeader(Exception):
 		pass
 
@@ -352,10 +361,10 @@ class Match:
 	def update_shooters(self, match_shooters):
 		for match_shooter in match_shooters:
 			self.update_shooter(match_shooter)
-	def shooter_list(self):
-		return [id for id in self.shooters if not self.shooters[id].disqualified and not self.shooters[id].deleted]
-	def stage_list(self):
-		return [id for id in self.stages if not self.stages[id].deleted]
+	#def shooter_list(self):
+	#	return [id for id in self.shooters if not self.shooters[id].disqualified and not self.shooters[id].deleted]
+	#def stage_list(self):
+	#	return [id for id in self.stages if not self.stages[id].deleted]
 	def shooter_list_by_division(self):
 		shooter_list = self.shooter_list()
 		divisions = {self.shooters[id].division for id in shooter_list}
@@ -371,17 +380,32 @@ class Match:
 			if not shooter.deleted and not shooter.disqualified:
 				data[shooter.division].append(shooter.data())
 		return data
-	def stage_data(self):
-		stage_list = self.stage_list()
-		for id in stage_list:
-			self.stages[id].post_process()
-		return [self.stages[id].data() for id in stage_list]
+	#def stage_data(self):
+	#	stage_list = self.stage_list()
+	#	for id in stage_list:
+	#		self.stages[id].post_process()
+	#	return [self.stages[id].data() for id in stage_list]
 	def stage(self, stage_id):
 		return self.stages.get(stage_id)
 	def score_data(self):
 		return [[self.scores[stage_id][shooter_id].data() for stage_id in self.scores for shooter_id in self.scores[stage_id]]]
 	def data(self):
-		return {'name': self.name, 'id': self.id, 'stages': self.stage_data(), 'scores': self.score_data()}
+		self.post_process()
+		return {'name': self.name, 'id': self.id, 'stages': self.stage_data, 'scores': self.score_data(), 'sub_type': self.sub_type}
+	def post_process(self):
+		self.stage_list = [id for id in self.stages if not self.stages[id].deleted]
+		self.shooter_list = [id for id in self.shooters if not self.shooters[id].disqualified and not self.shooters[id].deleted]
+		self.divisions = {self.shooters[id].division for id in self.shooter_list}
+		self.shooter_list_by_division = {division: [id for id in self.shooter_list if self.shooters[id].division == division] for division in self.divisions}
+		for stage_id in self.scores:
+			for shooter_id in self.scores[stage_id]:
+				self.scores[stage_id][shooter_id].post_process()
+		for id in self.stage_list:
+			self.stages[id].post_process()
+		for id in self.shooter_list:
+			self.shooters[id].post_process()
+		self.stage_data = [self.stages[id].data() for id in self.stage_list]
+		
 
 @Match.register('ipsc')
 class IPSCMatch(Match):
@@ -396,7 +420,7 @@ class IPSCMatch(Match):
 @Match.register('silhouette')
 class SilhouetteMatch(Match):
 	def data(self):
-		return super().data() | {'divisions': [ self.shooters[shooter_id].data() for shooter_id in self.shooter_list()]}
+		return super().data() | {'divisions': self.shooter_by_division()}
 
 class Shooter:
 	_subclasses = {}
@@ -429,11 +453,11 @@ class Shooter:
 				self.update(match_shooter)
 	
 	def update(self, match_shooter):
-		self.firstname = match_shooter['sh_fn']
-		self.lastname = match_shooter['sh_ln']
-		self.division = match_shooter['sh_dvp']
+		self.firstname = match_shooter.get('sh_fn', '')
+		self.lastname = match_shooter.get('sh_ln', '')
+		self.division = match_shooter.get('sh_dvp', '')
 		if self.division in kiosk.division_name_substitutions:
-			self.short_division = kiosk.division_name_substitutions[match_shooter['sh_dvp']]
+			self.short_division = kiosk.division_name_substitutions[self.division]
 		else:
 			self.short_division = self.division
 		self.deleted = match_shooter.get('sh_del', False)
@@ -442,6 +466,12 @@ class Shooter:
 	
 	def name(self):
 		return f'{self.firstname} {self.lastname}'
+		
+	def data(self):
+		return {'name': self.name(),
+			'short_division': self.short_division}
+	def post_process(self):
+		pass
 
 @Shooter.register('ipsc')
 class IPSCShooter(Shooter):
@@ -523,9 +553,7 @@ class IPSCShooter(Shooter):
 		self.match_points_total_string = f'{self.match_points_total:.4f}'
 	def data(self):
 		self.scores()
-		return {'name': self.name(),
-			'short_division': self.short_division,
-			'hits': self.hits,
+		return super().data() | {'hits': self.hits,
 			'hit_factor_string': self.hit_factor_string,
 			'match_points': self.match_points,
 			'match_points_string': self.match_points_string,
@@ -540,12 +568,14 @@ class IPSCShooter(Shooter):
 @Shooter.register('silhouette')
 class SilhouetteShooter(Shooter):
 	def data(self):
-		return {'name': self.name(), 'scores': self.scores() }
+		return super().data() | {'targets': self.targets, 'match_points': self.match_points, 'match_points_string': self.match_points_string }
 	
-	def scores(self):
-		stage_list = self.match.stage_list()
-		
-		return [self.match.scores[stage_id][self.id].data() if stage_id in self.match.scores and self.id in self.match.scores[stage_id] else 0 for stage_id in stage_list]
+	def post_process(self):
+		stage_list = self.match.stage_list
+		scores = self.match.scores
+		self.targets = {stage_id: scores[stage_id][self.id].score if stage_id in scores and self.id in scores[stage_id] else 0 for stage_id in stage_list}
+		self.match_points = sum(self.targets.values())
+		self.match_points_string = f'{self.match_points:.0f}'
 
 class Stage:
 	_subclasses = {}
@@ -661,7 +691,7 @@ class StageScore:
 	
 	def update_if_modified(self, stage_stagescore):
 		modified_date = stage_stagescore['mod']
-		if stage_stagescore['mod'] != self.modified_date:
+		if modified_date != self.modified_date:
 			modified_date_1 = datetime.datetime.strptime(modified_date,'%Y-%m-%d %H:%M:%S.%f')
 			modified_date_2 = datetime.datetime.strptime(self.modified_date,'%Y-%m-%d %H:%M:%S.%f')
 			if modified_date_1 > modified_date_2:
@@ -707,17 +737,22 @@ class IPSCStageScore(StageScore):
 
 @StageScore.register('silhouette')
 class SilhouetteStageScore(StageScore):
+	def __init__(self, match, stage_id, stage_stagescore):
+		super().__init__(match, stage_id, stage_stagescore)
+		self.score = 0
+	
 	def data(self):
-		return super().data() | {'score': self.score()}
+		return super().data() | {'score': self.score}
 		
 	def update(self, stage_stagescore):
+		super().update(stage_stagescore)
 		self.targets = stage_stagescore.get('cts')
 		
-	def score(self):
+	def post_process(self):
 		if self.stage_id in self.match.stages:
-			return numpy.sum(numpy.multiply(self.targets, self.match.stages[self.stage_id].targets))
+			self.score = numpy.sum(numpy.multiply(self.targets, self.match.stages[self.stage_id].targets))
 		else:
-			return 0
+			self.score = 0
 
 if __name__ == '__main__':
 	kiosk = Kiosk()
