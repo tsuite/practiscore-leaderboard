@@ -20,6 +20,7 @@ table td.time{text-align: right}
 table td.hit_factor{text-align: right}
 table td.hits{text-align: center}
 table td.place{text-align: center}
+table td.zone{text-align: center}
 /* table.ipsc td.name{text-align: center} */
 table td, th {
 	border-left: 2px solid #fff;

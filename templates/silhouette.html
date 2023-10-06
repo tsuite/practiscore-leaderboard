@@ -1,31 +1,69 @@
-{% macro match(match) -%}
+{%- macro match(match) -%}
 <table class="silhouette">
 <tr>
 <th>#</th>
 <th>Name</th>
 <th>Div.</th>
 <th>Match Pts</th>
-{% for stage in match.stages %}
+{%- for stage in match.stages -%}
 <th><a href="/match/{{ match.id }}/stage/{{ stage.id }}">{{ stage.name }}</a></th>
-{% endfor %}
-{% for division_name, division in match.divisions|dictsort %}
+{%- endfor -%}
+{%- for division_name, division in match.divisions|dictsort -%}
 </tr>
-{% for shooter in division|sort(attribute='match_points', reverse=True) %}
-{% if loop.first %}
+{%- for shooter in division|sort(attribute='match_points_total', reverse=True) -%}
+{%- if loop.first -%}
 <tr class="hr">
-{% else %}
+{%- else -%}
 <tr>
-{% endif %}
+{%- endif -%}
 <td class="place">{{ loop.index }}</td>
 <td>{{ shooter.name }}</td>
 <td class="division">{{ shooter.short_division }}</td>
-<td class="match_points">{{ shooter.match_points_string }}</td>
-{% for stage in match.stages %}
-<td class="match_points">{{ shooter.targets[stage.id] }}</th>
-{% endfor %}
+<td class="match_points">{{ shooter.match_points_total }}</td>
+{%- for stage in match.stages -%}
+<td class="match_points">{{ shooter.match_points[stage.id] }}</th>
+{%- endfor -%}
 </tr>
-{% endfor %}
-{% endfor %}
+{%- endfor -%}
+{%- endfor -%}
 </table>
 <br>
+{%- endmacro -%}
+
+{%- macro stage(match, stage) -%}
+{%- set stage_id = stage.id %}
+<a href="/">Index</a> <a href="/match/{{ match.id }}">{{ match.name }}</a> Stage {{ stage.name }}
+<table class="silhouette">
+<tr>
+<th>#</th>
+<th>Name</th>
+<th>Div.</th>
+{%- for target in stage.targets -%}
+{%- set target_index = loop.index -%}
+{%- for zone in target -%}
+<th>Target {{ target_index }} {{ zone.name }}</th>
+{%- endfor -%}
+{%- endfor -%}
+<th>Stage Pts</th>
+</tr>
+{%- for division_name, division in match.divisions|dictsort -%}
+{%- for shooter in division -%}
+{%- if loop.first -%}
+<tr class="hr">
+{%- else -%}
+<tr>
+{%- endif -%}
+<td class="place">{{ loop.index }}</td>
+<td>{{ shooter.name }}</td>
+<td class="division">{{ shooter.short_division }}</td>
+{%- for target in shooter.targets[stage.id] -%}
+{%- for zone in target -%}
+<td class="zone">{{ zone }}</td>
+{%- endfor -%}
+{%- endfor -%}
+<td class="match_points">{{ shooter.match_points[stage.id] }}</td>
+</tr>
+{%- endfor -%}
+{%- endfor -%}
+</table>
 {%- endmacro -%}

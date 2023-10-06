@@ -14,7 +14,7 @@ import datetime
 import sys
 import json
 import argparse
-import numpy
+import os
 
 app = flask.Flask(__name__)
 
@@ -22,18 +22,26 @@ __version__ = '1.0.0-alpha'
 print(f'practiscore-leaderboard-{__version__}')
 
 
-@app.get('/')
-def get_index():
+@app.get('/2')
+def get_index2():
 	data = kiosk.data()
 	for match in data['matches']:
 		for division in match['divisions']:
 				match['divisions'][division] = sorted(match['divisions'][division], key=lambda x: x['match_points_total'], reverse=True)
 	return flask.render_template('index.html', data=data, version=__version__, time=datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
 
-@app.get('/2')
-def get_index2():
+@app.get('/')
+def get_index():
 	data = kiosk.data()
 	return flask.render_template('matches.html', data=data, version=__version__, time=datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+	
+@app.get('/match/<match_id>')
+def get_match(match_id):
+	data = kiosk.match_data(match_id)
+	if data['match']:
+		return flask.render_template('match.html', data=data, version=__version__, time=datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+	return flask.redirect('/', code=302)
+
 
 @app.get('/json/device')
 def get_json_device():
@@ -61,8 +69,8 @@ def get_json_match_scores(id):
 	else:
 		return {'error', 404}, 404
 
-@app.get('/match/<match_id>')
-def get_match(match_id):
+@app.get('/match2/<match_id>')
+def get_match2(match_id):
 	data = kiosk.match_data(match_id)
 	if data['match']:
 		for division in data['match']['divisions']:
@@ -74,9 +82,7 @@ def get_match(match_id):
 def get_stage(match_id, stage_id):
 	data = kiosk.stage_data(match_id, stage_id)
 	if data['match'] and data['stage']:
-		if data['match']['match_id'] == match_id:
-			for division in data['match']['divisions']:
-				data['match']['divisions'][division] = sorted(data['match']['divisions'][division], key=lambda x: x['match_points'][stage_id], reverse=True)
+		if data['match']['id'] == match_id:
 			return flask.render_template('stage.html', data=data, version=__version__, time=datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
 	return flask.redirect('/', code=302)
 
@@ -258,6 +264,9 @@ class PSDevice(Device):
 		if match_def:
 			self.match_def = match_def
 			
+		if self.shutdown and self.shutdown == self.match_def.get('match_id'):
+			os.system('/usr/bin/sudo /usr/sbin/shutdown -h now')
+			
 		if match_scores_length:
 			match_scores = json.loads(zlib.decompress(await reader.readexactly(match_scores_length)))
 			if match_scores:
@@ -406,7 +415,6 @@ class Match:
 			self.shooters[id].post_process()
 		self.stage_data = [self.stages[id].data() for id in self.stage_list]
 		
-
 @Match.register('ipsc')
 class IPSCMatch(Match):
 	def update_match_data(self, match_def):
@@ -568,14 +576,14 @@ class IPSCShooter(Shooter):
 @Shooter.register('silhouette')
 class SilhouetteShooter(Shooter):
 	def data(self):
-		return super().data() | {'targets': self.targets, 'match_points': self.match_points, 'match_points_string': self.match_points_string }
+		return super().data() | {'targets': self.targets, 'match_points_total': self.match_points_total, 'match_points': self.match_points}
 	
 	def post_process(self):
 		stage_list = self.match.stage_list
 		scores = self.match.scores
-		self.targets = {stage_id: scores[stage_id][self.id].score if stage_id in scores and self.id in scores[stage_id] else 0 for stage_id in stage_list}
-		self.match_points = sum(self.targets.values())
-		self.match_points_string = f'{self.match_points:.0f}'
+		self.targets = {stage_id: scores[stage_id][self.id].targets if stage_id in scores and self.id in scores[stage_id] else self.match.stages[stage_id].blank_score for stage_id in stage_list}
+		self.match_points = {stage_id: scores[stage_id][self.id].score if stage_id in scores and self.id in scores[stage_id] else 0 for stage_id in stage_list}
+		self.match_points_total = sum(self.match_points[stage_id] for stage_id in self.match_points)
 
 class Stage:
 	_subclasses = {}
@@ -654,7 +662,9 @@ class SilhouetteStage(Stage):
 	def update(self, match_stage):
 		super().update(match_stage)
 		stage_customtargets = match_stage.get('stage_customtargets')
-		self.targets = [[float(target_desc[1]) for target_desc in target['target_targdesc']] for target in stage_customtargets]
+		#self.targets = [[float(target_desc[1]) for target_desc in target['target_targdesc']] for target in stage_customtargets]
+		self.targets = [ [{'name': target_desc[0], 'value': target_desc[1]} for target_desc in target['target_targdesc']] for target in stage_customtargets ]
+		self.blank_score = [[0 for target_desc in target['target_targdesc']] for target in stage_customtargets]
 	
 	def data(self):
 		return super().data() | {'targets': self.targets}
@@ -742,7 +752,7 @@ class SilhouetteStageScore(StageScore):
 		self.score = 0
 	
 	def data(self):
-		return super().data() | {'score': self.score}
+		return super().data() | {'score': self.score, 'targets': self.targets}
 		
 	def update(self, stage_stagescore):
 		super().update(stage_stagescore)
@@ -750,7 +760,9 @@ class SilhouetteStageScore(StageScore):
 		
 	def post_process(self):
 		if self.stage_id in self.match.stages:
-			self.score = numpy.sum(numpy.multiply(self.targets, self.match.stages[self.stage_id].targets))
+			self.score = sum([ sum([int(d['value'])*c for c,d in zip(target, stage_target)]) for target, stage_target in zip(self.targets, self.match.stages[self.stage_id].targets)])
+			
+			#self.score = 0#numpy.sum(numpy.multiply(self.targets, self.match.stages[self.stage_id].targets))
 		else:
 			self.score = 0
 

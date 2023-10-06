@@ -1,64 +1,13 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<title>practiscore-leaderboard-{{version}}</title>
-<link rel="stylesheet" href="/static/style.css">
-<link rel="shortcut icon" href="/static/favicon.ico">
-<meta http-equiv="refresh" content="30">
-</head>
-<body>
-{{ time }}
-<br>
-{% set match = data['match'] %}
-{% set stage = data['stage'] %}
-{% set stage_id = stage['stage_id'] %}
-<a href="/">Index</a> <a href="/match/{{match['match_id']}}">{{ match['match_name'] }}</a> Stage {{ stage.stage_number }} <span class="max_score">(Max Points {{ stage.max_points }})</span>
-<table class="ipsc">
-<tr>
-<th>#</th>
-<th>Name</th>
-<th>Div.</th>
-<th>A</th>
-<th>B</th>
-<th>C</th>
-<th>D</th>
-<th>M</th>
-<th>NPM</th>
-<th>NS</th>
-<th>Proc</th>
-<th>Pts</th>
-<th>Pen</th>
-<th>Time</th>
-<th>Hit F</th>
-<th>Stage Pts</th>
-<th>Stage %</th>
-</tr>
-{% for division_name, division in match.divisions|dictsort %}
-{% for shooter in division %}
-{% if loop.first %}
-<tr class="hr">
-{% else %}
-<tr>
-{% endif %}
-<td class="place">{{ loop.index }}</td>
-<td>{{ shooter.name }}</td>
-<td class="division">{{ shooter.short_division }}</td>
-<td class="hits">{{ shooter.hits[stage_id]['A'] }}</td>
-<td class="hits">{{ shooter.hits[stage_id]['B'] }}</td>
-<td class="hits">{{ shooter.hits[stage_id]['C'] }}</td>
-<td class="hits">{{ shooter.hits[stage_id]['D'] }}</td>
-<td class="hits">{{ shooter.hits[stage_id]['M'] }}</td>
-<td class="hits">{{ shooter.hits[stage_id]['NPM'] }}</td>
-<td class="hits">{{ shooter.hits[stage_id]['NS'] }}</td>
-<td class="hits">{{ shooter.hits[stage_id]['Proc'] }}</td>
-<td class="points">{{ shooter.points_string[stage_id] }}</td>
-<td class="penalties">{{ shooter.penalties[stage_id] }}</td>
-<td class="time">{{ shooter.time_string[stage_id] }}</td>
-<td class="hit_factor">{{ shooter.hit_factor_string[stage_id] }}</td>
-<td class="match_points">{{ shooter.match_points_string[stage_id] }}</td>
-<td class="match_percent">{{ shooter.stage_percent_string[stage_id] }}</td>
-</tr>
-{% endfor %}
-{% endfor %}
-</table>
-</body></html>
+{%- extends 'base.html' -%}
+{%- import 'ipsc.html' as ipsc -%}
+{%- import 'silhouette.html' as silhouette -%}
+
+{%- block content -%}
+{%- set match = data.match -%}
+{%- set stage = data.stage -%}
+{%- if match['sub_type'] == 'ipsc' -%}
+{{ ipsc.stage(match, stage) }}
+{%- elif match['sub_type'] == 'silhouette' -%}
+{{ silhouette.stage(match, stage) }}
+{%- endif -%}
+{%- endblock -%}
