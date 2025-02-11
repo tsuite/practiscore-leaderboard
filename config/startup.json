@@ -1,0 +1,68 @@
+{
+  "devices": [
+    {
+      "id": "Red",
+      "type": "PSDevice",
+      "address": "172.17.2.17",
+      "shutdown": "625e52df-113f-4066-ac00-ee51867a8e7e",
+      "match_def_path": "match_def_red.json",
+      "match_scores_path": "match_scores_red.json"
+    },
+    {
+      "id": "Blue",
+      "type": "PSDevice",
+      "address": "172.17.2.14",
+      "shutdown": "625e52df-113f-4066-ac00-ee51867a8e7e",
+      "match_def_path": "match_def_blue.json",
+      "match_scores_path": "match_scores_blue.json"
+    },
+    {
+      "id": "RedDummy",
+      "type": "FileDevice",
+      "match_def_path": "match_def_red.json",
+      "match_scores_path": "match_scores_red.json"
+    },
+    {
+      "id": "BlueDummy",
+      "type": "FileDevice",
+      "match_def_path": "match_def_blue.json",
+      "match_scores_path": "match_scores_blue.json"
+    }
+  ],
+  "division_name_substitutions":
+  {
+    "Rimfire": "R",
+    "Rimfire Optic": "RO",
+    "Rimfire Revolver": "RR",
+    "Rimfire Revolver Optic": "RRO",
+    "Rimfire Holster": "RH",
+    "Rimfire Holster Optic": "RHO",
+    "Rimfire Holster Revolver": "RHR",
+    "Rimfire Holster Revolver Optic": "RHRO",
+    "Centrefire": "C",
+    "Centrefire Optic": "CO",
+    "Centrefire Revolver": "CR",
+    "Centrefire Revolver Optic": "CRO",
+    "Production": "P",
+    "Open": "O",
+    "Production Optics": "PO",
+    "Standard": "S",
+    "Classic": "C",
+    "Revolver": "R",
+    "Wimpy": "W",
+    "Cattle Baron": "CB",
+    "Cowboy": "C",
+    "Duelist": "D",
+    "Forty-Niner": "FN",
+    "Frontier Cartridge": "FC",
+    "Gunfighter": "G",
+    "Lady Fortyniner": "LF",
+    "Senior": "S",
+    "Silver Senior": "SS",
+    "Wrangler": "W",
+		"Iron Sight Revolver": "ISR",
+		"Optic Sight Revolver": "OSR",
+		"Rimfire Pistol Iron Sights": "RFPI",
+		"Rimfire Pistol Open": "RFPO"
+  }
+}

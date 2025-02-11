@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>device / practiscore-leaderboard-{{version}}</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="shortcut icon" href="/static/favicon.ico">
+<meta http-equiv="refresh" content="10">
+</head>
+<body>
+{{ time }}
+<br>
+<table>
+<tr><th>Device</th><th>Type</th><th>Save</th></tr>
+{% for device in data %}
+<tr>
+	<td><a href="/json/device/{{ data[device].id }}">{{ data[device].id }}</a></td>
+	<td>{{ data[device].__class__.__name__ }}</td>
+	<td><form action="/save/device/{{ data[device].id }}" method="post"><button>Save</button></form></td>
+</tr>
+{% endfor %}
+</table>
+</body></html>
