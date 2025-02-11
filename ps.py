@@ -315,9 +315,15 @@ class Match:
 	def update(self, match_def, match_scores):
 		modified_date = match_def['match_modifieddate']
 		if modified_date != self.modified_date:
-			modified_date_1 = datetime.datetime.strptime(modified_date,'%Y-%m-%d %H:%M:%S.%f')
-			modified_date_2 = datetime.datetime.strptime(self.modified_date,'%Y-%m-%d %H:%M:%S.%f')
-			if modified_date_1 > modified_date_2:
+			try:
+				modified_time_1 = datetime.datetime.strptime(modified_date,'%Y-%m-%d %H:%M:%S.%f')
+			except:
+				modified_time_1 = datetime.datetime.strptime(modified_date,'%Y-%m-%d %H:%M:%S')
+			try:
+				modified_time_2 = datetime.datetime.strptime(self.modified_date,'%Y-%m-%d %H:%M:%S.%f')
+			except:
+				modified_time_2 = datetime.datetime.strptime(self.modified_date,'%Y-%m-%d %H:%M:%S')
+			if modified_time_1 > modified_time_2:
 				self.update_match_data(match_def)
 		if 'match_shooters' in match_def:
 			self.update_shooters(match_def['match_shooters'])
@@ -430,6 +436,16 @@ class SilhouetteMatch(Match):
 	def data(self):
 		return super().data() | {'divisions': self.shooter_by_division()}
 
+@Match.register('scsa')
+class SCSAMatch(Match):
+	def data(self):
+		return super().data() | {'divisions': self.shooter_by_division()}
+
+@Match.register('sass')
+class SASSMatch(Match):
+	def data(self):
+		return super().data() | {'divisions': self.shooter_by_division()}
+
 class Shooter:
 	_subclasses = {}
 	
@@ -455,8 +471,14 @@ class Shooter:
 	def update_if_modified(self, match_shooter):
 		modified_date = match_shooter['sh_mod']
 		if match_shooter['sh_mod'] != self.modified_date:
-			modified_time_1 = datetime.datetime.strptime(modified_date,'%Y-%m-%d %H:%M:%S.%f')
-			modified_time_2 = datetime.datetime.strptime(self.modified_date,'%Y-%m-%d %H:%M:%S.%f')
+			try:
+				modified_time_1 = datetime.datetime.strptime(modified_date,'%Y-%m-%d %H:%M:%S.%f')
+			except:
+				modified_time_1 = datetime.datetime.strptime(modified_date,'%Y-%m-%d %H:%M:%S')
+			try:
+				modified_time_2 = datetime.datetime.strptime(self.modified_date,'%Y-%m-%d %H:%M:%S.%f')
+			except:
+				modified_time_2 = datetime.datetime.strptime(self.modified_date,'%Y-%m-%d %H:%M:%S')
 			if modified_time_1 > modified_time_2:
 				self.update(match_shooter)
 	
@@ -585,6 +607,45 @@ class SilhouetteShooter(Shooter):
 		self.match_points = {stage_id: scores[stage_id][self.id].score if stage_id in scores and self.id in scores[stage_id] else 0 for stage_id in stage_list}
 		self.match_points_total = sum(self.match_points[stage_id] for stage_id in self.match_points)
 
+@Shooter.register('scsa')
+class SCSAShooter(Shooter):
+	def data(self):
+		return super().data() | {'scores': self.scores, 'time':self.time, 'scores_string': self.scores_string, 'time_string':self.time_string}
+	
+	def post_process(self):
+		stage_list = self.match.stage_list
+		scores = self.match.scores
+		self.scores = {stage_id: scores[stage_id][self.id].score if stage_id in scores and self.id in scores[stage_id] else 120 for stage_id in stage_list}
+		self.scores_string = {stage_id: '-' if self.scores[stage_id] == 120 else f'{self.scores[stage_id]:.2f}' for stage_id in self.scores}
+		self.time = sum(self.scores[stage_id] for stage_id in self.scores)
+		self.time_string = '-' if self.time == 480 else f'{self.time:.2f}'
+		#self.targets = {stage_id: scores[stage_id][self.id].targets if stage_id in scores and self.id in scores[stage_id] else self.match.stages[stage_id].blank_score for stage_id in stage_list}
+		#self.match_points = {stage_id: scores[stage_id][self.id].score if stage_id in scores and self.id in scores[stage_id] else 0 for stage_id in stage_list}
+		#self.match_points_total = sum(self.match_points[stage_id] for stage_id in self.match_points)
+
+@Shooter.register('sass')
+class SASSShooter(Shooter):
+	def update(self, match_shooter):
+		super().update(match_shooter)
+		self.alias = match_shooter.get('sh_al', '')
+	def data(self):
+		return super().data() | {'scores': self.scores, 'time':self.time, 'scores_string': self.scores_string, 'time_string':self.time_string, 'miss_string':self.miss_string, 'penalties_string':self.penalties_string, 'string_string':self.string_string}
+	def name(self):
+		return self.alias
+	def post_process(self):
+		stage_list = self.match.stage_list
+		scores = self.match.scores
+		self.scores = {stage_id: scores[stage_id][self.id].score if stage_id in scores and self.id in scores[stage_id] else 300 for stage_id in stage_list}
+		self.string = {stage_id: scores[stage_id][self.id].string if stage_id in scores and self.id in scores[stage_id] else 0 for stage_id in stage_list}
+		self.penalties = {stage_id: scores[stage_id][self.id].penalties if stage_id in scores and self.id in scores[stage_id] else 300 for stage_id in stage_list}
+		self.miss = {stage_id: scores[stage_id][self.id].miss if stage_id in scores and self.id in scores[stage_id] else 0 for stage_id in stage_list}
+		self.scores_string = {stage_id: '-' if self.scores[stage_id] == 300 else f'{self.scores[stage_id]:.2f}' for stage_id in self.scores}
+		self.string_string = {stage_id: '' if self.string[stage_id] == 0 else f'{self.string[stage_id]:.2f}' for stage_id in self.string}
+		self.penalties_string = {stage_id: '' if self.penalties[stage_id] == 0 else f'{self.penalties[stage_id]:.2f}' for stage_id in self.penalties}
+		self.miss_string = {stage_id: '' if self.miss[stage_id] == 0 else f'{self.miss[stage_id]}' for stage_id in self.miss}
+		self.time = sum(self.scores[stage_id] for stage_id in self.scores)
+		self.time_string = '-' if self.time == 300*len(self.scores) else f'{self.time:.2f}'
+
 class Stage:
 	_subclasses = {}
 	
@@ -618,6 +679,10 @@ class Stage:
 	def update(self, match_stage):
 		self.number = match_stage.get('stage_number')
 		self.name = match_stage.get('stage_name')
+		if self.name in kiosk.stage_name_substitutions:
+			self.short_name = kiosk.stage_name_substitutions[self.name]
+		else:
+			self.short_name = self.name
 		self.modified_date = match_stage.get('stage_modifieddate')
 		self.deleted = match_stage.get('stage_deleted', False)
 	
@@ -625,7 +690,7 @@ class Stage:
 		pass
 	
 	def data(self):
-		return {'id': self.id, 'number': self.number, 'name': self.name}
+		return {'id': self.id, 'number': self.number, 'name': self.name, 'short_name': self.short_name}
 
 @Stage.register('ipsc')
 class IPSCStage(Stage):
@@ -669,6 +734,14 @@ class SilhouetteStage(Stage):
 	def data(self):
 		return super().data() | {'targets': self.targets}
 
+@Stage.register('scsa')
+class SCSAStage(Stage):
+	pass
+
+@Stage.register('sass')
+class SASSStage(Stage):
+	pass
+
 class StageScore:
 	_subclasses = {}
 	
@@ -706,7 +779,10 @@ class StageScore:
 			modified_date_2 = datetime.datetime.strptime(self.modified_date,'%Y-%m-%d %H:%M:%S.%f')
 			if modified_date_1 > modified_date_2:
 				self.update(stage_stagescore)
-				
+	
+	def post_process(self):
+		pass
+	
 	def data(self):
 		return {'stage_id': self.stage_id, 'shooter_id': self.shooter_id, 'type':self.__class__.__name__} 
 
@@ -765,6 +841,55 @@ class SilhouetteStageScore(StageScore):
 			#self.score = 0#numpy.sum(numpy.multiply(self.targets, self.match.stages[self.stage_id].targets))
 		else:
 			self.score = 0
+
+@StageScore.register('scsa')
+class SCSAStageScore(StageScore):
+	def __init__(self, match, stage_id, stage_stagescore):
+		super().__init__(match, stage_id, stage_stagescore)
+		self.score = 0
+	
+	def update(self, stage_stagescore):
+		super().update(stage_stagescore)
+		self.strings = stage_stagescore.get('str', [0,0,0,0,0])
+		self.penalties = stage_stagescore.get('penss', [[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]])
+		
+	def post_process(self):
+		penalties = [3, 3, 30, 4]
+		self.strings_with_penalties = [st+sum([p*q for p,q in zip(pen,penalties)]) for st,pen in zip(self.strings, self.penalties)]
+		self.strings_with_penalties = [ 30 if string == 0 else min(string,30) for string in self.strings_with_penalties]
+		if self.stage_id in self.match.stages:
+			self.score = sum(self.strings_with_penalties) - max(self.strings_with_penalties)
+		else:
+			self.score = 120
+	def data(self):
+		return super().data() | {'score': self.score, 'strings': self.strings, 'penalties':self.penalties, 'strings_with_penalties':self.strings_with_penalties}
+
+@StageScore.register('sass')
+class SASSStageScore(StageScore):
+	def __init__(self, match, stage_id, stage_stagescore):
+		super().__init__(match, stage_id, stage_stagescore)
+		self.score = 0
+	
+	def update(self, stage_stagescore):
+		super().update(stage_stagescore)
+		strings = stage_stagescore.get('str', [0])
+		self.string = strings[0]
+		self.pens = stage_stagescore.get('pens', [0,0,0,0])
+		
+	def post_process(self):
+		penalties = [5, 10, 10, 30]
+		#self.strings_with_penalties = [st+sum([p*q for p,q in zip(pen,penalties)]) for st,pen in zip(self.strings, self.penalties)]
+		#self.strings_with_penalties = [ 30 if string == 0 else min(string,30) for string in self.strings_with_penalties]
+		self.penalties = sum([p*q for p,q in zip(self.pens, penalties)])
+		self.miss = self.pens[0]
+		self.string_with_penalties = self.string + self.penalties
+		self.string_with_penalties = 300 if self.string_with_penalties == 0 else min(self.string_with_penalties,300)
+		if self.stage_id in self.match.stages:
+			self.score = self.string_with_penalties
+		else:
+			self.score = 300
+	def data(self):
+		return super().data() | {'score': self.score, 'string': self.string, 'penalties':self.penalties, 'miss':self.miss}
 
 if __name__ == '__main__':
 	kiosk = Kiosk()

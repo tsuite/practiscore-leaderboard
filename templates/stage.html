@@ -1,6 +1,8 @@
 {%- extends 'base.html' -%}
 {%- import 'ipsc.html' as ipsc -%}
 {%- import 'silhouette.html' as silhouette -%}
+{%- import 'scsa.html' as scsa -%}
+{%- import 'sass.html' as sass -%}
 
 {%- block content -%}
 {%- set match = data.match -%}
@@ -9,5 +11,9 @@
 {{ ipsc.stage(match, stage) }}
 {%- elif match['sub_type'] == 'silhouette' -%}
 {{ silhouette.stage(match, stage) }}
+{%- elif match['sub_type'] == 'scsa' -%}
+{{ scsa.stage(match, stage) }}
+{%- elif match['sub_type'] == 'sass' -%}
+{{ sass.stage(match, stage) }}
 {%- endif -%}
 {%- endblock -%}
