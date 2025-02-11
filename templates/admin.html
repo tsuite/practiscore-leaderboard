@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>admin / practiscore-leaderboard-{{version}}</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="shortcut icon" href="/static/favicon.ico">
+</head>
+<body>
+{{ time }}
+<br>
+Configuration:
+<form action="/admin" method="post">
+<select name="file" id="file-select">
+{% for file in data %}
+<option value="{{ file }}">{{ file }}</option>
+{% endfor %}
+<option value="new">New file</option>
+</select><br>
+<label for="new-filename">File name</label><input type="text" name="new-filename" id="new-filename"><br>
+<input type="submit" name="action" value="load">
+<input type="submit" name="action" value="save">
+<input type="submit" name="action" value="view">
+<input type="submit" name="action" value="delete"><br>
+<label for="auth">Auth:</label><input type="text" id="auth">
+</form><br>
+Device:
+<form action="/admin" method="post">
+s
+</form><br>
+
+System:
+<form action="/admin" method="post">
+<input type="submit" name="action" value="shutdown"><input type="submit" name="action" value="restart">
+</form>
+<br>
+</body></html>

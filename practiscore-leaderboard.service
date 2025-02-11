@@ -6,8 +6,8 @@ After=network.target
 User=kiosk
 Group=kiosk
 WorkingDirectory=/home/kiosk/practiscore-leaderboard
-Environment="PATH=/home/kiosk/practiscore-leaderboard/venv/bin"
-ExecStart=/home/kiosk/practiscore-leaderboard/ps.py
+Environment="PATH=/home/kiosk/practiscore-leaderboard/.venv/bin"
+ExecStart=/home/kiosk/practiscore-leaderboard/practiscore-leaderboard.py
 
 [Install]
 WantedBy=multi-user.target
