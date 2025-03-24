@@ -3,7 +3,7 @@
     {
       "id": "Red",
       "type": "PSDevice",
-      "address": "172.17.2.17",
+      "address": "192.168.1.18",
       "shutdown": "625e52df-113f-4066-ac00-ee51867a8e7e",
       "match_def_path": "match_def_red.json",
       "match_scores_path": "match_scores_red.json"
@@ -11,7 +11,7 @@
     {
       "id": "Blue",
       "type": "PSDevice",
-      "address": "172.17.2.14",
+      "address": "192.168.1.17",
       "shutdown": "625e52df-113f-4066-ac00-ee51867a8e7e",
       "match_def_path": "match_def_blue.json",
       "match_scores_path": "match_scores_blue.json"
@@ -60,9 +60,9 @@
     "Senior": "S",
     "Silver Senior": "SS",
     "Wrangler": "W",
-		"Iron Sight Revolver": "ISR",
-		"Optic Sight Revolver": "OSR",
-		"Rimfire Pistol Iron Sights": "RFPI",
-		"Rimfire Pistol Open": "RFPO"
+    "Iron Sight Revolver": "ISR",
+    "Optic Sight Revolver": "OSR",
+    "Rimfire Pistol Iron Sights": "RFPI",
+    "Rimfire Pistol Open": "RFPO"
   }
 }

@@ -22,10 +22,10 @@ print(f'practiscore-leaderboard-{__version__}')
 def is_modified(modified_date_1, modified_date_2):
 	if modified_date_1 == modified_date_2:
 		return False
-	date_1 = str_to_datetime(modified_date)
-	date_2 = str_to_datetime(reference_date)
+	date_1 = str_to_datetime(modified_date_1)
+	date_2 = str_to_datetime(modified_date_2)
 	return date_1 > date_2
-	
+
 def str_to_datetime(string):
 	try:
 		return datetime.datetime.strptime(string,'%Y-%m-%d %H:%M:%S.%f')
@@ -146,21 +146,21 @@ class Config:
 
 class Device:
 	_subclasses = {}
-	
+
 	@classmethod
 	def register(cls, sub_type):
 		def decorator(subclass):
 			cls._subclasses[sub_type] = subclass
 			return subclass
 		return decorator
-	
+
 	@classmethod
 	def create(cls, device):
 		sub_type = device.get('type')
 		if sub_type not in cls._subclasses:
 			return None
 		return cls._subclasses[sub_type](device)
-	
+
 	def __init__(self, device):
 		self.device = device
 		self.id = device.get('id')
@@ -169,16 +169,16 @@ class Device:
 		self.enabled = self.device.get('enabled')
 		self.match_def = {}
 		self.match_scores = {}
-	
+
 	def data(self):
 		return self.device
-	
+
 	def start(self):
 		self.update()
-	
+
 	def save(self):
 		pass
-		
+
 	def update(self):
 		raise NotImplementedError
 
@@ -196,14 +196,14 @@ class PSDevice(Device):
 	DEFAULT_PORT = 59623
 	DEFAULT_TIMEOUT = 5
 	DEFAULT_POLL_TIME = 10
-	
+
 	def __init__(self, device):
 		super().__init__(device)
 		self.port = self.device.get('port', self.DEFAULT_PORT)
 		self.timeout = self.device.get('timeout', self.DEFAULT_TIMEOUT)
 		self.poll_time = self.device.get('poll_time', self.DEFAULT_POLL_TIME)
 		self.address = self.device.get('address')
-		
+
 	def update(self):
 		try:
 			asyncio.run(asyncio.wait_for(self.update_async(), timeout=self.timeout))
@@ -211,41 +211,41 @@ class PSDevice(Device):
 			print(f'{self.id}: Timeout Error')
 		except OSError:
 			print(f'{self.id}: OSError')
-		
+
 	async def update_async(self):
 		reader, writer = await asyncio.open_connection(self.address, self.port)
-		
+
 		tx_data = struct.pack('!IIIII', self.SIGNATURE, self.LENGTH, self.MSG_MATCH_REQUEST, self.VERSION, int(time.time()))
 		writer.write(tx_data)
 		await writer.drain()
-		
+
 		rx_header = await reader.readexactly(20)
-		
+
 		(f_signature, f_length, f_type, f_flags, f_time) = struct.unpack('!IIIII', rx_header)
 		f_signature_err = f_signature != self.SIGNATURE
 		f_type_err = f_type != self.MSG_MATCH_RESPONSE
 		f_flags_err = f_flags != self.VERSION
 		if f_signature_err or f_type_err or f_flags_err:
 			raise self.PSInvalidHeader
-		
+
 		match_def_length = struct.unpack('!I',await reader.readexactly(4))[0]
 		match_scores_length = f_length - match_def_length - 4
-		
+
 		match_def = json.loads(zlib.decompress(await reader.readexactly(match_def_length)))
 		if match_def:
 			self.match_def = match_def
-			
+
 		#if self.shutdown and self.shutdown == self.match_def.get('match_id'):
 		#	os.system('/usr/bin/sudo /usr/sbin/shutdown -h now')
-			
+
 		if match_scores_length:
 			match_scores = json.loads(zlib.decompress(await reader.readexactly(match_scores_length)))
 			if match_scores:
 				self.match_scores = match_scores
-				
+
 		writer.close()
 		await writer.wait_closed()
-	
+
 	def save(self):
 		if self.match_def and self.match_def_path:
 			with open(self.match_def_path, 'w') as f:
@@ -253,7 +253,7 @@ class PSDevice(Device):
 		if self.match_scores and self.match_scores_path:
 			with open(self.match_scores_path, 'w') as f:
 				f.write(json.dumps(self.match_scores))
-	
+
 	class PSInvalidHeader(Exception):
 		pass
 
@@ -275,21 +275,21 @@ class FileDevice(Device):
 
 class Match:
 	_subclasses = {}
-	
+
 	@classmethod
 	def register(cls, sub_type):
 		def decorator(subclass):
 			cls._subclasses[sub_type] = subclass
 			return subclass
 		return decorator
-	
+
 	@classmethod
 	def create(cls, match_def, match_scores):
 		sub_type = match_def.get('match_subtype')
 		if sub_type not in cls._subclasses:
 			return None
 		return cls._subclasses[sub_type](match_def, match_scores)
-	
+
 	def __init__(self, match_def, match_scores):
 		self.id = match_def.get('match_id')
 		self.sub_type = match_def.get('match_subtype')
@@ -298,11 +298,11 @@ class Match:
 		self.scores = {}
 		self.update_match_data(match_def)
 		self.update(match_def, match_scores)
-	
+
 	def data(self):
 		self.post_process()
 		return {'name': self.name, 'id': self.id, 'stages': self.stage_data, 'scores': self.score_data(), 'sub_type': self.sub_type}	
-	
+
 	def post_process(self):
 		self.stage_list = [id for id in self.stages if not self.stages[id].deleted]
 		self.shooter_list = [id for id in self.shooters if not self.shooters[id].disqualified and not self.shooters[id].deleted]
@@ -319,7 +319,7 @@ class Match:
 
 	def score_data(self):
 		return [[self.scores[stage_id][shooter_id].data() for stage_id in self.scores for shooter_id in self.scores[stage_id]]]
-	
+
 	def shooter_by_division(self):
 		data = {}
 		for id in self.shooters:
@@ -329,7 +329,7 @@ class Match:
 			if not shooter.deleted and not shooter.disqualified:
 				data[shooter.division].append(shooter.data())
 		return data
-		
+
 	def update(self, match_def, match_scores):
 		modified_date = match_def.get('match_modifieddate')
 		if is_modified(modified_date, self.modified_date):
@@ -340,11 +340,11 @@ class Match:
 			self.update_stages(match_def.get('match_stages'))
 		if 'match_scores' in match_scores:
 			self.update_scores(match_scores.get('match_scores'))
-			
+
 	def update_match_data(self, match_def):
 		self.name = match_def.get('match_name')
 		self.modified_date = match_def.get('match_modifieddate')
-		
+
 	def update_scores(self, match_scores):
 		for stage in match_scores:
 			for stage_stagescore in stage.get('stage_stagescores'):
@@ -358,7 +358,7 @@ class Match:
 					score = StageScore.create(self, stage_id, stage_stagescore)
 					if score:
 						self.scores[stage_id][shooter_id] = score
-	
+
 	def update_stage(self, match_stage):
 		stage_id = match_stage.get('stage_uuid')
 		if stage_id in self.stages:
@@ -367,11 +367,11 @@ class Match:
 			stage = Stage.create(self, match_stage)
 			if stage:
 				self.stages[stage_id] = stage
-	
+
 	def update_stages(self, match_stages):
 		for match_stage in match_stages:
 			self.update_stage(match_stage)
-			
+
 	def update_shooter(self, match_shooter):
 		shooter_id = match_shooter.get('sh_uid')
 		if shooter_id in self.shooters:
@@ -380,11 +380,11 @@ class Match:
 			shooter = Shooter.create(self, match_shooter)
 			if shooter:
 				self.shooters[shooter_id] = shooter
-	
+
 	def update_shooters(self, match_shooters):
 		for match_shooter in match_shooters:
 			self.update_shooter(match_shooter)
-	
+
 @Match.register('scsa')
 class SCSAMatch(Match):
 	def data(self):
@@ -397,31 +397,31 @@ class SCSAMatch(Match):
 
 class Shooter:
 	_subclasses = {}
-	
+
 	@classmethod
 	def register(cls, sub_type):
 		def decorator(subclass):
 			cls._subclasses[sub_type] = subclass
 			return subclass
 		return decorator
-	
+
 	@classmethod
 	def create(cls, match, match_shooter):
 		sub_type = match.sub_type
 		if sub_type not in cls._subclasses:
 			return None
 		return cls._subclasses[sub_type](match, match_shooter)
-	
+
 	def __init__(self, match, match_shooter):
 		self.id = match_shooter.get('sh_uid')
 		self.match = match
 		self.update(match_shooter)
-	
+
 	def update_if_modified(self, match_shooter):
 		modified_date = match_shooter.get('sh_mod')
 		if is_modified(modified_date, self.modified_date):
 			self.update(match_shooter)
-	
+
 	def update(self, match_shooter):
 		self.firstname = match_shooter.get('sh_fn', '')
 		self.lastname = match_shooter.get('sh_ln', '')
@@ -433,10 +433,10 @@ class Shooter:
 		self.deleted = match_shooter.get('sh_del', False)
 		self.disqualified = match_shooter.get('sh_dq', False)
 		self.modified_date = match_shooter.get('sh_mod')
-	
+
 	def name(self):
 		return f'{self.firstname} {self.lastname}'
-		
+
 	def data(self):
 		return {'name': self.name(),
 			'short_division': self.short_division}
@@ -447,7 +447,7 @@ class Shooter:
 class SCSAShooter(Shooter):
 	def data(self):
 		return super().data() | {'scores': self.scores, 'time':self.time, 'scores_string': self.scores_string, 'time_string':self.time_string}
-	
+
 	def post_process(self):
 		stage_list = self.match.stage_list
 		scores = self.match.scores
@@ -458,14 +458,14 @@ class SCSAShooter(Shooter):
 
 class Stage:
 	_subclasses = {}
-	
+
 	@classmethod
 	def register(cls, sub_type):
 		def decorator(subclass):
 			cls._subclasses[sub_type] = subclass
 			return subclass
 		return decorator
-	
+
 	@classmethod
 	def create(cls, match, match_stage):
 		sub_type = match.sub_type
@@ -477,12 +477,12 @@ class Stage:
 		self.match = match
 		self.id = match_stage.get('stage_uuid')
 		self.update(match_stage)
-		
+
 	def update_if_modified(self, match_stage):
 		modified_date = match_stage.get('stage_modifieddate')
 		if is_modified(modified_date, self.modified_date):
 			self.update(match_stage)
-	
+
 	def update(self, match_stage):
 		self.number = match_stage.get('stage_number')
 		self.name = match_stage.get('stage_name')
@@ -492,10 +492,10 @@ class Stage:
 			self.short_name = self.name
 		self.modified_date = match_stage.get('stage_modifieddate')
 		self.deleted = match_stage.get('stage_deleted', False)
-	
+
 	def post_process(self):
 		pass
-	
+
 	def data(self):
 		return {'id': self.id, 'number': self.number, 'name': self.name, 'short_name': self.short_name}
 
@@ -505,14 +505,14 @@ class SCSAStage(Stage):
 
 class StageScore:
 	_subclasses = {}
-	
+
 	@classmethod
 	def register(cls, sub_type):
 		def decorator(subclass):
 			cls._subclasses[sub_type] = subclass
 			return subclass
 		return decorator
-	
+
 	@classmethod
 	def create(cls, match, stage_id, stage_stagescore):
 		sub_type = match.sub_type
@@ -525,22 +525,22 @@ class StageScore:
 		self.stage_id = stage_id
 		self.shooter_id = stage_stagescore.get('shtr')
 		self.update(stage_stagescore)
-	
+
 	def update(self, stage_stagescore):
 		if 'dnf' in stage_stagescore:
 			self.dnf = stage_stagescore.get('dnf')
 		else:
 			self.dnf = False
 		self.modified_date = stage_stagescore.get('mod')
-	
+
 	def update_if_modified(self, stage_stagescore):
 		modified_date = stage_stagescore.get('mod')
 		if is_modified(modified_date, self.modified_date):
 			self.update(stage_stagescore)
-	
+
 	def post_process(self):
 		pass
-	
+
 	def data(self):
 		return {'stage_id': self.stage_id, 'shooter_id': self.shooter_id, 'type':self.__class__.__name__} 
 
@@ -549,12 +549,12 @@ class SCSAStageScore(StageScore):
 	def __init__(self, match, stage_id, stage_stagescore):
 		super().__init__(match, stage_id, stage_stagescore)
 		self.score = 0
-	
+
 	def update(self, stage_stagescore):
 		super().update(stage_stagescore)
 		self.strings = stage_stagescore.get('str', [0,0,0,0,0])
 		self.penalties = stage_stagescore.get('penss', [[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]])
-		
+
 	def post_process(self):
 		penalties = [3, 3, 30, 4]
 		self.strings_with_penalties = [st+sum([p*q for p,q in zip(pen,penalties)]) for st,pen in zip(self.strings, self.penalties)]
@@ -578,11 +578,11 @@ class Kiosk:
 			self.devices[device.get('id')] = Device.create(device)
 		for device in self.devices:
 			self.devices[device].update()
-	
+
 	def data(self):
 		matches = self.matches()
 		return {'matches': [matches[id].data() for id in matches], 'devices': [self.devices[id].data() for id in self.devices]}
-	
+
 	def matches(self):
 		matches = {}
 		for device_name in self.devices:
@@ -597,16 +597,16 @@ class Kiosk:
 				if match:
 					matches[match_id] = match
 		return matches
-		
+
 	def match(self, match_id):
 		matches = self.matches()
 		return matches.get(match_id)
-		
+
 	def update(self):
 		for device in self.devices:
 			self.devices[device].update()
 			self.devices[device].save()
-	
+
 	def start(self):
 		self.scheduler = BackgroundScheduler()
 		for device_name in self.devices:
