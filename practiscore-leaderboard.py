@@ -301,7 +301,7 @@ class Match:
 
 	def data(self):
 		self.post_process()
-		return {'name': self.name, 'id': self.id, 'stages': self.stage_data, 'scores': self.score_data(), 'sub_type': self.sub_type}	
+		return {'name': self.name, 'id': self.id, 'stages': self.stage_data, 'scores': self.score_data(), 'sub_type': self.sub_type, 'divisions': self.shooter_by_division(), 'combined': self.shooter_combined()}	
 
 	def post_process(self):
 		self.stage_list = [id for id in self.stages if not self.stages[id].deleted]
@@ -328,6 +328,15 @@ class Match:
 				data[shooter.division] = []
 			if not shooter.deleted and not shooter.disqualified:
 				data[shooter.division].append(shooter.data())
+		return data
+
+	def shooter_combined(self):
+		data = {}
+		data['Combined'] = []
+		for id in self.shooters:
+			shooter = self.shooters[id]
+			if not shooter.deleted and not shooter.disqualified:
+				data['Combined'].append(shooter.data())
 		return data
 
 	def update(self, match_def, match_scores):
@@ -385,10 +394,19 @@ class Match:
 		for match_shooter in match_shooters:
 			self.update_shooter(match_shooter)
 
+@Match.register('ipsc')
+class IPSCMatch(Match):
+	def update_match_data(self, match_def):
+		super().update_match_data(match_def)
+		self.match_pfs = {pf['name'].lower():pf for pf in match_def.get('match_pfs')}
+	def data(self):
+		return super().data() | {'match_pfs': self.match_pfs,
+			'stages': self.stage_data,
+			'divisions': self.shooter_by_division()}
+
 @Match.register('scsa')
 class SCSAMatch(Match):
-	def data(self):
-		return super().data() | {'divisions': self.shooter_by_division()}
+	pass
 
 #@Match.register('sass')
 #class SASSMatch(Match):
@@ -443,10 +461,102 @@ class Shooter:
 	def post_process(self):
 		pass
 
+@Shooter.register('ipsc')
+class IPSCShooter(Shooter):
+	def update(self, match_shooter):
+		super().update(match_shooter)
+		self.pf = match_shooter.get('sh_pf', '')
+	def score_string(self, stage):
+		if not self.disqualified and stage.id in self.scores:
+			score = self.scores[stage.id]
+			if score.dnf:
+				return 'DNF'
+			if score.hit_factor != 0:
+				return score.hit_factor_string
+		return '-'
+	def scores(self):
+		self.match_points = {}
+		self.match_points_string = {}
+		self.stage_percent = {}
+		self.stage_percent_string = {}
+		self.hit_factor_string = {}
+		self.points_string = {}
+		self.time_string = {}
+		self.hits = {}
+		self.penalties = {}
+		if not self.disqualified:
+			for stage_id in [id for id in self.match.stages if not self.match.stages[id].deleted]:
+				stage = self.match.stages[stage_id]
+				max_hit_factor = stage.max_hit_factors.get(self.division,0)
+				if stage_id in self.match.scores and self.id in self.match.scores[stage_id]:
+					score = self.match.scores[stage_id][self.id]
+					self.penalties[stage_id] = score.penalties
+					self.time_string[stage_id] = score.time_string
+					self.hits[stage_id] = score.hits
+					self.penalties[stage_id] = score.penalties
+					if score.dnf :
+						self.stage_percent[stage_id] = 0
+						self.stage_percent_string[stage_id] = 'DNF'
+						self.match_points[stage_id] = 0
+						self.match_points_string[stage_id] = 'DNF'
+						self.time_string[stage_id] = 'DNF'
+						self.hit_factor_string[stage_id] = 'DNF'
+						self.points_string[stage_id] = 'DNF'
+					elif score.time == 0:
+						self.stage_percent[stage_id] = 0
+						self.stage_percent_string[stage_id] = '-'
+						self.match_points[stage_id] = 0
+						self.match_points_string[stage_id] = '-'
+						self.time_string[stage_id] = '-'
+						self.hit_factor_string[stage_id] = '-'
+						self.points_string[stage_id] = '-'
+					elif score.hit_factor == 0 or max_hit_factor == 0:
+						self.stage_percent[stage_id] = 0
+						self.stage_percent_string[stage_id] = f'{0:.2f} %'
+						self.match_points[stage_id] = 0
+						self.match_points_string[stage_id] = f'{0:.4f}'
+						self.time_string[stage_id] = f'{0:.2f}'
+						self.hit_factor_string[stage_id] = f'{0:.4f}'
+						self.points_string[stage_id] = f'{0}'
+					else:
+						hit_factor_ratio = score.hit_factor/max_hit_factor
+						self.stage_percent[stage_id] = hit_factor_ratio*100
+						self.stage_percent_string[stage_id] = f'{hit_factor_ratio*100:.2f} %'
+						match_points = hit_factor_ratio*stage.max_points
+						self.match_points[stage_id] = match_points
+						self.match_points_string[stage_id] = f'{match_points:.4f}'
+						self.time_string[stage_id] = f'{score.time:.2f}'
+						self.hit_factor_string[stage_id] = f'{score.hit_factor:.4f}'
+						self.points_string[stage_id] = f'{score.points}'
+				else:
+					self.stage_percent[stage_id] = 0
+					self.stage_percent_string[stage_id] = '-'
+					self.match_points[stage_id] = 0
+					self.match_points_string[stage_id] = '-'
+					self.time_string[stage_id] = '-'
+					self.hit_factor_string[stage_id] = '-'
+					self.points_string[stage_id] = '-'
+					self.hits[stage_id] = {'A':'-', 'B':'-', 'C': '-', 'D': '-', 'M': '-', 'NS': '-', 'NPM': '-', 'Proc': '-'}
+		self.match_points_total = sum(self.match_points[x] for x in self.match_points)
+		self.match_points_total_string = f'{self.match_points_total:.4f}'
+	def data(self):
+		self.scores()
+		return super().data() | {'hits': self.hits,
+			'hit_factor_string': self.hit_factor_string,
+			'match_points': self.match_points,
+			'match_points_string': self.match_points_string,
+			'match_points_total': self.match_points_total,
+			'match_points_total_string': self.match_points_total_string,
+			'points_string':self.points_string,
+			'time_string':self.time_string,
+			'stage_percent':self.stage_percent,
+			'stage_percent_string':self.stage_percent_string,
+			'penalties':self.penalties}
+
 @Shooter.register('scsa')
 class SCSAShooter(Shooter):
 	def data(self):
-		return super().data() | {'scores': self.scores, 'time':self.time, 'scores_string': self.scores_string, 'time_string':self.time_string}
+		return super().data() | {'scores': self.scores, 'time': self.time, 'scores_string': self.scores_string, 'time_string': self.time_string}
 
 	def post_process(self):
 		stage_list = self.match.stage_list
@@ -476,6 +586,7 @@ class Stage:
 	def __init__(self, match, match_stage):
 		self.match = match
 		self.id = match_stage.get('stage_uuid')
+		self.number = match_stage.get('stage_number')
 		self.update(match_stage)
 
 	def update_if_modified(self, match_stage):
@@ -497,7 +608,37 @@ class Stage:
 		pass
 
 	def data(self):
-		return {'id': self.id, 'number': self.number, 'name': self.name, 'short_name': self.short_name}
+		return {'id': self.id, 'number': self.number, 'name': self.name, 'short_name': self.short_name, 'stage_id': self.id}
+
+@Stage.register('ipsc')
+class IPSCStage(Stage):
+	def __init__(self, match, match_stage):
+		super().__init__(match, match_stage)
+		self.max_hit_factor = 0
+		self.max_hit_factors = {}
+	
+	def update(self, match_stage):
+		super().update(match_stage)
+		self.stage_poppers = match_stage.get('stage_poppers', 0)
+		self.stage_targets = match_stage.get('stage_targets', [])
+		self.stage_reqshots = self.stage_poppers + sum(stage_target.get('target_reqshots', 0) for stage_target in self.stage_targets)
+		self.max_points = 5*self.stage_reqshots
+	
+	def post_process(self):
+		self.max_hit_factor = 0
+		self.max_hit_factors = {}
+		for shooter_id in self.match.shooters:
+			if not self.match.shooters[shooter_id].deleted and not self.match.shooters[shooter_id].disqualified:
+				if self.id in self.match.scores and shooter_id in self.match.scores[self.id]:
+					hit_factor = self.match.scores[self.id][shooter_id].hit_factor
+					if shooter_id in self.match.shooters:
+						division = self.match.shooters[shooter_id].division
+						self.max_hit_factors[division] = max(self.max_hit_factors[division] if division in self.max_hit_factors else 0, hit_factor)
+					self.max_hit_factor = max(self.max_hit_factor, hit_factor)
+				
+	
+	def data(self):
+		return super().data() | {'max_points': self.max_points, 'stage_reqshots': self.stage_reqshots, 'stage_poppers': self.stage_poppers, 'stage_targets': self.stage_targets, 'stage_deleted': self.deleted, 'max_hit_factor': self.max_hit_factor, 'max_hit_factors': self.max_hit_factors}
 
 @Stage.register('scsa')
 class SCSAStage(Stage):
@@ -527,10 +668,7 @@ class StageScore:
 		self.update(stage_stagescore)
 
 	def update(self, stage_stagescore):
-		if 'dnf' in stage_stagescore:
-			self.dnf = stage_stagescore.get('dnf')
-		else:
-			self.dnf = False
+		self.dnf = stage_stagescore.get('dnf', False)
 		self.modified_date = stage_stagescore.get('mod')
 
 	def update_if_modified(self, stage_stagescore):
@@ -543,6 +681,41 @@ class StageScore:
 
 	def data(self):
 		return {'stage_id': self.stage_id, 'shooter_id': self.shooter_id, 'type':self.__class__.__name__} 
+
+@StageScore.register('ipsc')
+class IPSCStageScore(StageScore):
+	def update(self, stage_stagescore):
+		super().update(stage_stagescore)
+		self.raw_points = stage_stagescore.get('rawpts', 0)
+		hits = {'A':0, 'B':0, 'C': 0, 'D': 0, 'M': 0, 'NS': 0, 'NPM': 0, 'Proc': 0}
+		points = ('A', 'B', 'C', 'D')
+		penalties = ('M', 'NS')
+		pf = self.match.match_pfs.get(self.match.shooters[self.shooter_id].pf.lower(),{})
+		proc_cnts = stage_stagescore.get('proc_cnts',[])
+		hits['A'] = stage_stagescore.get('poph', 0)
+		hits['NS'] = stage_stagescore.get('popns', 0)
+		hits['M'] = stage_stagescore.get('popm', 0)
+		hits['Proc'] = sum(sum(proc_cnt[x] for x in proc_cnt) for proc_cnt in proc_cnts)
+		if 'ts' in stage_stagescore:
+			for x in stage_stagescore['ts']:
+				hits['A'] += (x) & 0xf
+				hits['B'] += (x >> 4) & 0xf
+				hits['C'] += (x >> 8) & 0xf
+				hits['D'] += (x >> 12) & 0xf
+				hits['NS'] += (x >> 16) & 0xf
+				hits['M'] += (x >> 20) & 0xf
+				hits['NPM'] += (x >> 24) & 0xf
+		self.points = sum(pf[k]*hits[k] for k in pf if k in points)
+		self.penalties = sum(pf[k]*hits[k] for k in pf if k in penalties)+10*hits['Proc']
+		self.time = sum(stage_stagescore['str'])
+		self.time_string = f'{self.time:.2f}'
+		self.hits = hits
+		if self.time == 0:
+			self.hit_factor = 0
+			self.hit_factor_string = '-'
+		else:
+			self.hit_factor = max(self.points-self.penalties, 0)/self.time
+			self.hit_factor_string = f'{self.hit_factor:.4f}'
 
 @StageScore.register('scsa')
 class SCSAStageScore(StageScore):

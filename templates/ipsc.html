@@ -1,3 +1,31 @@
-{% macro match(match) -%}
-IPSC{{ match.id }}
+{%- macro match(match) -%}
+<table class="ipsc">
+<tr>
+<th>#</th>
+<th>Name</th>
+<th>Div.</th>
+<th>Match Pts</th>
+{%- for stage in match.stages -%}
+<th><a href="/match/{{ match['id'] }}/stage/{{ stage.id }}">Stage {{ stage.number }}</a><br><span class="max_score">Max Points {{ stage.max_points }}</span></th>
+{%- endfor -%}
+{%- for division_name, division in match.divisions|dictsort -%}
+</tr>
+{%- for shooter in division -%}
+{%- if loop.first -%}
+<tr class="hr">
+{%- else -%}
+<tr>
+{%- endif -%}
+<td class="place">{{ loop.index }}</td>
+<td>{{ shooter.name }}</td>
+<td class="division">{{ shooter.short_division }}</td>
+<td class="time">{{ shooter.match_points_total_string }}</td>
+{%- for stage in match.stages -%}
+<td class="match_points">{{ shooter.match_points_string[stage['stage_id']] }}</th>
+{%- endfor -%}
+</tr>
+{%- endfor -%}
+{%- endfor -%}
+</table>
+<br>
 {%- endmacro -%}
